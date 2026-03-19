@@ -6,6 +6,49 @@ The planned architecture centers on a custom operator that watches a user-facing
 
 This PoC will prove that we can present a clean Kubernetes-native API for instrumenting Python agent applications end to end while retaining control over the runtime image and orchestration flow. It is intended to validate the repository structure, deployment model, and developer workflow before implementation details are added for reconciliation logic, runtime behavior, telemetry pipelines, and example applications.
 
+## Local dependency layer for the demo
+
+The current demo dependency path is:
+
+```text
+app -> OTLP -> Collector -> Jaeger UI
+```
+
+This phase adds the Kubernetes-side dependencies needed for that path without yet wiring the custom operator into them.
+
+### What gets installed
+
+- **OpenTelemetry Operator** via raw upstream manifests applied by `kubectl` from `scripts/install-otel-operator.sh`.
+- **OpenTelemetry Collector** via `manifests/collector/collector.yaml`, running as a single demo instance managed by the OpenTelemetry Operator.
+- **Jaeger all-in-one** via `manifests/jaeger/jaeger.yaml`, with a ClusterIP service for the Jaeger UI and OTLP ingest ports enabled for the Collector.
+
+### Local demo install order
+
+A local kind cluster is the preferred target environment, though the scripts work against any current `kubectl` context.
+
+```bash
+make install-deps
+```
+
+Or install each dependency explicitly:
+
+```bash
+make install-otel-operator
+make install-jaeger
+make install-collector
+```
+
+After installation, port-forward the UI locally if needed:
+
+```bash
+kubectl port-forward -n observability svc/jaeger-query 16686:16686
+```
+
+Then point instrumented apps at the Collector OTLP endpoint inside the cluster:
+
+- gRPC: `demo-collector-collector.observability.svc.cluster.local:4317`
+- HTTP: `http://demo-collector-collector.observability.svc.cluster.local:4318`
+
 ## Repository layout
 
 - `operator/` - Custom Kubernetes operator skeleton.
