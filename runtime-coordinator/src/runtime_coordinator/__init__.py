@@ -1,1 +1,1 @@
-"""Runtime coordinator package placeholder."""
+"""Compatibility package for runtime coordinator entrypoints."""

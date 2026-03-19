@@ -1,5 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "runtime-coordinator"
 version = "0.1.0"
-description = "Placeholder runtime coordinator for the PoC"
+description = "Runtime coordinator for conflict-aware Python observability bootstrapping"
 requires-python = ">=3.11"
+
+[tool.setuptools]
+packages = ["agent_obs_runtime", "runtime_coordinator"]
+
+[tool.setuptools.package-dir]
+agent_obs_runtime = "agent_obs_runtime"
+runtime_coordinator = "src/runtime_coordinator"
