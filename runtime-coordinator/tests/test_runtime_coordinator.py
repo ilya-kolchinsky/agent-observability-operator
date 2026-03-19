@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent_obs_runtime.actuation import apply_plan
-from agent_obs_runtime.bootstrap import bootstrap
+from agent_obs_runtime.bootstrap import bootstrap, run
 from agent_obs_runtime.config import RuntimeConfig
 from agent_obs_runtime.detection import DetectionResult
 from agent_obs_runtime.diagnostics import get_logger
@@ -71,6 +71,12 @@ class RuntimeCoordinatorActuationTests(unittest.TestCase):
 
 
 class RuntimeCoordinatorBootstrapTests(unittest.TestCase):
+    def test_run_returns_cached_bootstrap_state(self):
+        first = run()
+        second = run()
+
+        self.assertIs(first, second)
+
     def test_bootstrap_emits_plan_and_actions(self):
         logger = get_logger()
         stream = io.StringIO()
