@@ -89,4 +89,16 @@ def bootstrap() -> BootstrapState:
     return state
 
 
-STATE = bootstrap()
+_STATE: BootstrapState | None = None
+
+
+def run() -> BootstrapState:
+    """Run bootstrap once and return the cached startup state."""
+
+    global _STATE
+    if _STATE is None:
+        _STATE = bootstrap()
+    return _STATE
+
+
+STATE = run()
