@@ -1,4 +1,7 @@
-.PHONY: build-images load-images-kind install-deps install-otel-operator install-collector install-jaeger deploy-operator deploy-demo-apps apply-sample-crs deploy port-forward-jaeger send-demo-traffic demo clean
+.PHONY: create-kind-cluster build-images load-images-kind install-deps install-otel-operator install-collector install-jaeger deploy-operator deploy-demo-apps apply-sample-crs deploy verify-demo port-forward-jaeger send-demo-traffic demo-walkthrough demo clean
+
+create-kind-cluster:
+	./scripts/create-kind-cluster.sh
 
 build-images:
 	./scripts/build-images.sh
@@ -29,13 +32,19 @@ apply-sample-crs:
 
 deploy: deploy-operator deploy-demo-apps apply-sample-crs
 
+verify-demo:
+	./scripts/verify-demo.sh
+
 port-forward-jaeger:
 	./scripts/port-forward-jaeger.sh
 
 send-demo-traffic:
 	./scripts/send-demo-traffic.sh
 
-demo: send-demo-traffic
+demo-walkthrough:
+	./scripts/demo.sh
+
+demo: demo-walkthrough
 
 clean:
 	./scripts/clean.sh

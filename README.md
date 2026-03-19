@@ -29,90 +29,254 @@ agent app
   - `mock-mcp-server.demo-apps.svc.cluster.local`
   - `mock-external-http-service.demo-apps.svc.cluster.local`
 
-## Local kind workflow
+## Demo walkthrough
 
-Build and load images:
+The most direct end-to-end path is:
+
+```bash
+make demo-walkthrough
+```
+
+That script chains the full local demo up through traffic generation, then tells you how to open Jaeger. If you want to walk the PoC step by step and verify each stage with your own eyes, use the commands below.
+
+### 1. Start a local Kubernetes cluster with kind
+
+```bash
+make create-kind-cluster
+kubectl get nodes
+```
+
+Expected result: a `kind-control-plane` node is `Ready` and your current kubectl context is `kind-kind`.
+
+### 2. Install dependencies
+
+Install the OpenTelemetry Operator, the demo Collector, and Jaeger:
+
+```bash
+make install-deps
+```
+
+If you prefer the explicit order used by the walkthrough:
+
+```bash
+make install-otel-operator
+make install-collector
+make install-jaeger
+```
+
+### 3. Build and load images
 
 ```bash
 make build-images
 make load-images-kind
 ```
 
-Install the dependency layer:
-
-```bash
-make install-deps
-```
-
-Deploy the operator and demo apps, then apply the sample CRs:
+### 4. Deploy the custom operator
 
 ```bash
 make deploy-operator
+kubectl get pods -n agent-observability-system
+```
+
+Expected result: the `agent-observability-operator` Deployment is `Available`.
+
+### 5. Deploy the demo app variants
+
+```bash
 make deploy-demo-apps
+kubectl get deployments -n demo-apps
+```
+
+Expected result: the three agent Deployments plus the two mock dependency Deployments are `Available`.
+
+### 6. Apply the custom resources
+
+```bash
 make apply-sample-crs
-```
-
-Send traffic and open Jaeger:
-
-```bash
-make send-demo-traffic
-make port-forward-jaeger
-```
-
-Then browse to `http://127.0.0.1:16686`.
-
-## Verifying the PoC
-
-### 1. Verify the operator reconciled the CRs
-
-```bash
 kubectl get agentobservabilitydemos -n demo-apps
-kubectl logs -n agent-observability-system deployment/agent-observability-operator --tail=200
 ```
 
-Look for log entries such as:
+Expected result: you see `no-existing`, `partial-existing`, and `full-existing`.
 
-- `reconciling AgentObservabilityDemo for end-to-end telemetry path`
-- `created Instrumentation resource`
-- `updated target Deployment for instrumentation injection`
-- `updated AgentObservabilityDemo status after reconciliation`
+### 7. Verify the generated `Instrumentation` resources exist
 
-### 2. Verify the OpenTelemetry Operator injected instrumentation
+```bash
+kubectl get instrumentation -n demo-apps
+kubectl get instrumentation no-existing-instrumentation -n demo-apps
+kubectl get instrumentation partial-existing-instrumentation -n demo-apps
+kubectl get instrumentation full-existing-instrumentation -n demo-apps
+```
+
+You can also run the automated verification helper:
+
+```bash
+make verify-demo
+```
+
+### 8. Verify the workload Pods were mutated for auto-instrumentation
+
+Inspect one of the agent Pods:
 
 ```bash
 kubectl get pods -n demo-apps
 kubectl describe pod -n demo-apps <agent-pod-name>
 ```
 
-Check the Pod annotations and environment for:
+Look for all of the following:
 
-- `instrumentation.opentelemetry.io/inject-python`
-- `instrumentation.opentelemetry.io/container-names`
-- `OTEL_EXPORTER_OTLP_ENDPOINT`
-- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+- the `instrumentation.opentelemetry.io/inject-python` annotation;
+- the `instrumentation.opentelemetry.io/container-names` annotation;
+- OpenTelemetry-related environment such as `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`; and
+- auto-instrumentation-related init container or injected instrumentation details from the OpenTelemetry Operator.
 
-### 3. Verify the runtime coordinator chose a mode
+The helper target performs these checks for all three agent variants:
 
 ```bash
-kubectl logs -n demo-apps deployment/agent-no-existing --tail=100
-kubectl logs -n demo-apps deployment/agent-partial-existing --tail=100
-kubectl logs -n demo-apps deployment/agent-full-existing --tail=100
+make verify-demo
 ```
 
-The runtime coordinator emits a JSON startup summary containing `selected_mode` and `selection_reason`. Expected modes for the PoC are:
+### 9. Send traffic to the demo agent endpoint
+
+```bash
+make send-demo-traffic
+```
+
+That script exercises `healthz`, `run`, and `stream` against all three demo agent services so there is data to inspect in the backend.
+
+### 10. Port-forward the Jaeger UI
+
+```bash
+make port-forward-jaeger
+```
+
+Then open `http://127.0.0.1:16686` in your browser.
+
+### 11. Open Jaeger and inspect traces
+
+In Jaeger:
+
+1. Search for the services `agent-no-existing`, `agent-partial-existing`, and `agent-full-existing`.
+2. Open a recent trace.
+3. Confirm the trace includes app spans plus downstream HTTP and MCP-related activity.
+4. Compare how the three services behave after the runtime coordinator chooses different ownership modes.
+
+Optional cross-checks from the cluster side:
+
+```bash
+kubectl logs -n observability deployment/demo-collector-collector --tail=200
+kubectl logs -n agent-observability-system deployment/agent-observability-operator --tail=200
+```
+
+### 12. Observe logs showing the runtime coordinator selected `FULL`, `AUGMENT`, and `REUSE_EXISTING`
+
+Check each demo app directly:
+
+```bash
+kubectl logs -n demo-apps deployment/agent-no-existing --tail=200
+kubectl logs -n demo-apps deployment/agent-partial-existing --tail=200
+kubectl logs -n demo-apps deployment/agent-full-existing --tail=200
+```
+
+Look for the runtime coordinator JSON startup summary containing `selected_mode`.
+
+Expected mapping:
 
 - `agent-no-existing` -> `FULL`
 - `agent-partial-existing` -> `AUGMENT`
 - `agent-full-existing` -> `REUSE_EXISTING`
 
-### 4. Verify traces reached Jaeger
+The helper target verifies this mapping automatically:
 
 ```bash
-kubectl logs -n observability deployment/demo-collector-collector --tail=200
-kubectl port-forward -n observability svc/agent-observability-jaeger 16686:16686
+make verify-demo
 ```
 
-The Collector uses both a `debug` exporter and an OTLP exporter to Jaeger, so the Collector logs should show trace export activity while the Jaeger UI should display spans for the demo agent services.
+## Troubleshooting
+
+### No traces arriving in Jaeger
+
+- Re-run `make send-demo-traffic` so fresh spans are generated.
+- Check Collector logs for OTLP receive/export activity:
+
+  ```bash
+  kubectl logs -n observability deployment/demo-collector-collector --tail=200
+  ```
+
+- Confirm the injected app configuration still points at `http://agent-observability-collector.observability.svc.cluster.local:4318`.
+- Make sure Jaeger is healthy:
+
+  ```bash
+  kubectl get pods -n observability
+  kubectl logs -n observability deployment/jaeger --tail=200
+  ```
+
+### Pod not mutated
+
+- Confirm the custom resource exists and targets the right workload/container:
+
+  ```bash
+  kubectl get agentobservabilitydemos -n demo-apps -o yaml
+  ```
+
+- Confirm the generated `Instrumentation` resource exists:
+
+  ```bash
+  kubectl get instrumentation -n demo-apps
+  ```
+
+- Inspect the operator reconcile logs for resource creation and workload patching:
+
+  ```bash
+  kubectl logs -n agent-observability-system deployment/agent-observability-operator --tail=200
+  ```
+
+- If the Deployment template changed but the Pod did not, delete the old Pod and let the Deployment recreate it:
+
+  ```bash
+  kubectl delete pod -n demo-apps <agent-pod-name>
+  ```
+
+### Coordinator not starting
+
+- Check app logs for startup failures:
+
+  ```bash
+  kubectl logs -n demo-apps deployment/agent-no-existing --tail=200
+  ```
+
+- Confirm the runtime coordinator ConfigMap was generated and mounted:
+
+  ```bash
+  kubectl get configmap -n demo-apps
+  kubectl describe pod -n demo-apps <agent-pod-name>
+  ```
+
+- Verify the custom Python auto-instrumentation image was built and loaded into kind:
+
+  ```bash
+  docker images | grep agent-observability/custom-python-autoinstrumentation
+  kind get clusters
+  ```
+
+### Jaeger UI not accessible
+
+- Confirm the port-forward is still running in the terminal where you started it:
+
+  ```bash
+  make port-forward-jaeger
+  ```
+
+- If port `16686` is already in use, choose another local port:
+
+  ```bash
+  LOCAL_PORT=26686 make port-forward-jaeger
+  ```
+
+- Verify the Jaeger Service and Pod exist:
+
+  ```bash
+  kubectl get svc,pods -n observability | grep jaeger
+  ```
 
 ## Repository layout
 
