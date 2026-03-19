@@ -31,6 +31,17 @@ func TestBuildDesiredInstrumentationMapsCRSpec(t *testing.T) {
 	}
 }
 
+func TestBuildDesiredInstrumentationFallsBackToDefaultCollectorService(t *testing.T) {
+	demo := testDemo()
+	demo.Spec.Instrumentation.OTelCollectorEndpoint = ""
+
+	instrumentation := buildDesiredInstrumentation(demo, demo.Spec.Target.Namespace)
+
+	if instrumentation.Spec.Exporter.Endpoint != defaultCollectorEndpoint {
+		t.Fatalf("expected default collector endpoint %q, got %q", defaultCollectorEndpoint, instrumentation.Spec.Exporter.Endpoint)
+	}
+}
+
 func TestBuildDesiredRuntimeCoordinatorConfigMapMapsCRSpec(t *testing.T) {
 	demo := testDemo()
 
@@ -48,6 +59,9 @@ func TestBuildDesiredRuntimeCoordinatorConfigMapMapsCRSpec(t *testing.T) {
 		"diagnosticsLevel: \"basic\"",
 		"detectFrameworkInstrumentation: true",
 		"disableDuplicateInstrumentations: true",
+		"exporterEndpoint: \"http://agent-observability-collector.observability.svc.cluster.local:4318\"",
+		"tracesEndpoint: \"http://agent-observability-collector.observability.svc.cluster.local:4318/v1/traces\"",
+		"protocol: \"http/protobuf\"",
 		"serviceName: \"agent-chat\"",
 		"deploymentName: \"agent-chat\"",
 	} {
@@ -85,7 +99,16 @@ func TestPrepareDeploymentForInstrumentationOnlyPatchesSelectedContainerAndIsIde
 	}
 
 	appContainer := deployment.Spec.Template.Spec.Containers[0]
-	for _, name := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_SERVICE_NAME", "OTEL_RESOURCE_ATTRIBUTES", runtimeCoordinatorConfigPathEnvName, "RUNTIME_COORDINATOR_CONFIG_MAP"} {
+	for _, name := range []string{
+		"OTEL_EXPORTER_OTLP_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_PROTOCOL",
+		"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+		"DEMO_OTLP_TRACES_ENDPOINT",
+		"OTEL_SERVICE_NAME",
+		"OTEL_RESOURCE_ATTRIBUTES",
+		runtimeCoordinatorConfigPathEnvName,
+		"RUNTIME_COORDINATOR_CONFIG_MAP",
+	} {
 		if !envVarExists(appContainer.Env, name) {
 			t.Fatalf("expected app container env var %q to be present", name)
 		}
@@ -154,8 +177,8 @@ func testDemo() *platformv1alpha1.AgentObservabilityDemo {
 	demo.Spec.Target.WorkloadName = "agent-chat"
 	demo.Spec.Target.WorkloadKind = "Deployment"
 	demo.Spec.Target.ContainerName = "app"
-	demo.Spec.Instrumentation.CustomPythonImage = "ghcr.io/example/custom-python:latest"
-	demo.Spec.Instrumentation.OTelCollectorEndpoint = "http://otel-collector.default.svc.cluster.local:4317"
+	demo.Spec.Instrumentation.CustomPythonImage = "agent-observability/custom-python-autoinstrumentation:latest"
+	demo.Spec.Instrumentation.OTelCollectorEndpoint = defaultCollectorEndpoint
 	demo.Spec.RuntimeCoordinator.Enabled = true
 	demo.Spec.RuntimeCoordinator.DiagnosticsLevel = "basic"
 	demo.Spec.RuntimeCoordinator.Heuristics.DetectExistingProvider = true

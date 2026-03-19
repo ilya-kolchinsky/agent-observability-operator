@@ -1,19 +1,19 @@
 apiVersion: platform.example.com/v1alpha1
 kind: AgentObservabilityDemo
 metadata:
-  name: sample-agent-observability-demo
-  namespace: default
+  name: no-existing
+  namespace: demo-apps
 spec:
   target:
-    namespace: default
-    workloadName: agent-chat
+    namespace: demo-apps
+    workloadName: agent-no-existing
     workloadKind: Deployment
     containerName: app
   instrumentation:
     enabled: true
     language: python
-    customPythonImage: ghcr.io/example/custom-python:latest
-    otelCollectorEndpoint: http://otel-collector.default.svc.cluster.local:4317
+    customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
+    otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
     mode: sdk-and-runtime-coordinator
   runtimeCoordinator:
     enabled: true
@@ -33,5 +33,5 @@ spec:
     suppression:
       disableDuplicateInstrumentations: true
   demo:
-    createSampleWorkload: true
-    sampleAppVariant: chat
+    createSampleWorkload: false
+    sampleAppVariant: no-existing

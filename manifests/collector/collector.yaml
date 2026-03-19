@@ -38,3 +38,24 @@ spec:
           exporters:
             - debug
             - otlp
+---
+# Stable, human-friendly endpoint for app workloads and generated Instrumentation
+# resources. The OpenTelemetry Operator still owns the actual Collector Deployment
+# and its generated Service, while this alias keeps a predictable DNS name.
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-observability-collector
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: agent-observability-collector
+spec:
+  type: ExternalName
+  externalName: demo-collector-collector.observability.svc.cluster.local
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318

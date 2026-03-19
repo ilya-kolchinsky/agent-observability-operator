@@ -8,7 +8,8 @@ MANIFEST_PATH=${MANIFEST_PATH:-"${REPO_ROOT}/manifests/collector/collector.yaml"
 cat <<MSG
 Installing demo OpenTelemetry Collector from local manifests.
 - manifest: ${MANIFEST_PATH}
-- mode: single OpenTelemetryCollector custom resource managed by the OpenTelemetry Operator
+- collector alias: agent-observability-collector.observability.svc.cluster.local:4318
+- export target: jaeger-collector.observability.svc.cluster.local:4317
 MSG
 
 kubectl apply -f "${MANIFEST_PATH}"

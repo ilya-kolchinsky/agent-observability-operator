@@ -1,5 +1,270 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-apps
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: placeholder-demo-app
-spec: {}
+  name: mock-mcp-server
+  namespace: demo-apps
+  labels:
+    app.kubernetes.io/name: mock-mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mock-mcp-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mock-mcp-server
+    spec:
+      containers:
+        - name: app
+          image: agent-observability/mock-mcp-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-mcp-server
+  namespace: demo-apps
+spec:
+  selector:
+    app.kubernetes.io/name: mock-mcp-server
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-external-http-service
+  namespace: demo-apps
+  labels:
+    app.kubernetes.io/name: mock-external-http-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mock-external-http-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mock-external-http-service
+    spec:
+      containers:
+        - name: app
+          image: agent-observability/mock-external-http-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-external-http-service
+  namespace: demo-apps
+spec:
+  selector:
+    app.kubernetes.io/name: mock-external-http-service
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+# The three agent Deployments intentionally keep the container name as `app` so the
+# custom operator can target a stable container when it adds the injection annotations,
+# runtime coordinator ConfigMap mount, and Collector env vars.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-no-existing
+  namespace: demo-apps
+  labels:
+    app.kubernetes.io/name: agent-no-existing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-no-existing
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-no-existing
+    spec:
+      containers:
+        - name: app
+          image: agent-observability/demo-agent-no-existing:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MCP_SERVER_URL
+              value: http://mock-mcp-server.demo-apps.svc.cluster.local:8000/mcp
+            - name: EXTERNAL_HTTP_URL
+              value: http://mock-external-http-service.demo-apps.svc.cluster.local:8000/context
+            - name: LOG_LEVEL
+              value: INFO
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-no-existing
+  namespace: demo-apps
+spec:
+  selector:
+    app.kubernetes.io/name: agent-no-existing
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-partial-existing
+  namespace: demo-apps
+  labels:
+    app.kubernetes.io/name: agent-partial-existing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-partial-existing
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-partial-existing
+    spec:
+      containers:
+        - name: app
+          image: agent-observability/demo-agent-partial-existing:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MCP_SERVER_URL
+              value: http://mock-mcp-server.demo-apps.svc.cluster.local:8000/mcp
+            - name: EXTERNAL_HTTP_URL
+              value: http://mock-external-http-service.demo-apps.svc.cluster.local:8000/context
+            - name: LOG_LEVEL
+              value: INFO
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-partial-existing
+  namespace: demo-apps
+spec:
+  selector:
+    app.kubernetes.io/name: agent-partial-existing
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-full-existing
+  namespace: demo-apps
+  labels:
+    app.kubernetes.io/name: agent-full-existing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-full-existing
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-full-existing
+    spec:
+      containers:
+        - name: app
+          image: agent-observability/demo-agent-full-existing:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MCP_SERVER_URL
+              value: http://mock-mcp-server.demo-apps.svc.cluster.local:8000/mcp
+            - name: EXTERNAL_HTTP_URL
+              value: http://mock-external-http-service.demo-apps.svc.cluster.local:8000/context
+            - name: DEMO_OTLP_TRACES_ENDPOINT
+              value: http://agent-observability-collector.observability.svc.cluster.local:4318/v1/traces
+            - name: LOG_LEVEL
+              value: INFO
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-full-existing
+  namespace: demo-apps
+spec:
+  selector:
+    app.kubernetes.io/name: agent-full-existing
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
