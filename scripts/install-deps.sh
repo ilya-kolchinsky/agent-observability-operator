@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 "${SCRIPT_DIR}/install-otel-operator.sh"
-"${SCRIPT_DIR}/install-jaeger.sh"
 "${SCRIPT_DIR}/install-collector.sh"
+"${SCRIPT_DIR}/install-jaeger.sh"
 
 cat <<'MSG'
 Dependency installation complete.
