@@ -16,6 +16,7 @@ type ObjectMeta struct {
 	Namespace         string            `json:"namespace,omitempty"`
 	Generation        int64             `json:"generation,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
 	CreationTimestamp Time              `json:"creationTimestamp,omitempty"`
 }
 
@@ -32,6 +33,12 @@ func (in *ObjectMeta) DeepCopyInto(out *ObjectMeta) {
 		out.Labels = make(map[string]string, len(in.Labels))
 		for key, value := range in.Labels {
 			out.Labels[key] = value
+		}
+	}
+	if in.Annotations != nil {
+		out.Annotations = make(map[string]string, len(in.Annotations))
+		for key, value := range in.Annotations {
+			out.Annotations[key] = value
 		}
 	}
 }
