@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"path"
 	"reflect"
 	"strings"
 
@@ -29,6 +30,8 @@ const (
 	runtimeCoordinatorConfigDir         = "/etc/agent-observability"
 	runtimeCoordinatorConfigPathEnvName = "RUNTIME_COORDINATOR_CONFIG_FILE"
 	runtimeCoordinatorVolumeName        = "agent-observability-runtime-config"
+	defaultCollectorEndpoint            = "http://agent-observability-collector.observability.svc.cluster.local:4318"
+	defaultCollectorProtocol            = "http/protobuf"
 )
 
 // AgentObservabilityDemoReconciler reconciles an AgentObservabilityDemo object.
@@ -62,6 +65,15 @@ func (r *AgentObservabilityDemoReconciler) Reconcile(ctx context.Context, req ct
 		return ctrl.Result{}, fmt.Errorf("unsupported target workload kind %q: only Deployment is supported for this PoC", demo.Spec.Target.WorkloadKind)
 	}
 
+	collectorEndpoint := collectorEndpointForDemo(&demo)
+	logger.Info(
+		"reconciling AgentObservabilityDemo for end-to-end telemetry path",
+		"targetNamespace", targetNamespace,
+		"targetWorkload", demo.Spec.Target.WorkloadName,
+		"targetContainer", demo.Spec.Target.ContainerName,
+		"collectorEndpoint", collectorEndpoint,
+	)
+
 	desiredInstrumentation := buildDesiredInstrumentation(&demo, targetNamespace)
 	if err := r.reconcileInstrumentation(ctx, logger, desiredInstrumentation); err != nil {
 		return ctrl.Result{}, err
@@ -85,17 +97,22 @@ func (r *AgentObservabilityDemoReconciler) Reconcile(ctx context.Context, req ct
 		if err := r.Update(ctx, &targetDeployment); err != nil {
 			return ctrl.Result{}, err
 		}
-		logger.Info("updated target Deployment for instrumentation injection",
+		logger.Info(
+			"updated target Deployment for instrumentation injection",
 			"name", targetDeployment.Name,
 			"namespace", targetDeployment.Namespace,
 			"container", demo.Spec.Target.ContainerName,
 			"configMap", desiredConfigMap.Name,
+			"collectorEndpoint", collectorEndpoint,
+			"collectorTracesEndpoint", collectorTracesEndpointForDemo(&demo),
 		)
 	} else {
-		logger.Info("target Deployment already prepared for instrumentation injection",
+		logger.Info(
+			"target Deployment already prepared for instrumentation injection",
 			"name", targetDeployment.Name,
 			"namespace", targetDeployment.Namespace,
 			"container", demo.Spec.Target.ContainerName,
+			"collectorEndpoint", collectorEndpoint,
 		)
 	}
 
@@ -121,7 +138,14 @@ func (r *AgentObservabilityDemoReconciler) Reconcile(ctx context.Context, req ct
 		demo.Status.ObservedGeneration = demo.Generation
 		statusChanged = true
 	}
-	message := fmt.Sprintf("Deployment %s in namespace %s is prepared for OpenTelemetry injection using Instrumentation %s and ConfigMap %s", targetDeployment.Name, targetDeployment.Namespace, desiredInstrumentation.Name, desiredConfigMap.Name)
+	message := fmt.Sprintf(
+		"Deployment %s in namespace %s is prepared for OpenTelemetry injection using Instrumentation %s and ConfigMap %s with collector endpoint %s",
+		targetDeployment.Name,
+		targetDeployment.Namespace,
+		desiredInstrumentation.Name,
+		desiredConfigMap.Name,
+		collectorEndpoint,
+	)
 	if demo.Status.Message != message {
 		demo.Status.Message = message
 		statusChanged = true
@@ -131,15 +155,18 @@ func (r *AgentObservabilityDemoReconciler) Reconcile(ctx context.Context, req ct
 		if err := r.Status().Update(ctx, &demo); err != nil {
 			return ctrl.Result{}, err
 		}
-		logger.Info("updated AgentObservabilityDemo status",
+		logger.Info(
+			"updated AgentObservabilityDemo status after reconciliation",
 			"phase", demo.Status.Phase,
 			"generatedInstrumentationName", demo.Status.GeneratedInstrumentationName,
 			"generatedConfigMapName", demo.Status.GeneratedConfigMapName,
+			"message", demo.Status.Message,
 		)
 		return ctrl.Result{}, nil
 	}
 
-	logger.Info("AgentObservabilityDemo status already up to date",
+	logger.Info(
+		"AgentObservabilityDemo status already up to date",
 		"phase", demo.Status.Phase,
 		"generatedInstrumentationName", demo.Status.GeneratedInstrumentationName,
 		"generatedConfigMapName", demo.Status.GeneratedConfigMapName,
@@ -159,7 +186,8 @@ func (r *AgentObservabilityDemoReconciler) reconcileInstrumentation(ctx context.
 		if err := r.Create(ctx, desiredInstrumentation); err != nil {
 			return err
 		}
-		logger.Info("created Instrumentation resource",
+		logger.Info(
+			"created Instrumentation resource",
 			"name", desiredInstrumentation.Name,
 			"namespace", desiredInstrumentation.Namespace,
 			"pythonImage", desiredInstrumentation.Spec.Python.Image,
@@ -174,14 +202,16 @@ func (r *AgentObservabilityDemoReconciler) reconcileInstrumentation(ctx context.
 			if err := r.Update(ctx, &existingInstrumentation); err != nil {
 				return err
 			}
-			logger.Info("updated Instrumentation resource",
+			logger.Info(
+				"updated Instrumentation resource",
 				"name", existingInstrumentation.Name,
 				"namespace", existingInstrumentation.Namespace,
 				"pythonImage", existingInstrumentation.Spec.Python.Image,
 				"collectorEndpoint", existingInstrumentation.Spec.Exporter.Endpoint,
 			)
 		} else {
-			logger.Info("Instrumentation resource already up to date",
+			logger.Info(
+				"Instrumentation resource already up to date",
 				"name", existingInstrumentation.Name,
 				"namespace", existingInstrumentation.Namespace,
 			)
@@ -199,7 +229,8 @@ func (r *AgentObservabilityDemoReconciler) reconcileConfigMap(ctx context.Contex
 		if err := r.Create(ctx, desiredConfigMap); err != nil {
 			return err
 		}
-		logger.Info("created runtime coordinator ConfigMap",
+		logger.Info(
+			"created runtime coordinator ConfigMap",
 			"name", desiredConfigMap.Name,
 			"namespace", desiredConfigMap.Namespace,
 		)
@@ -212,12 +243,14 @@ func (r *AgentObservabilityDemoReconciler) reconcileConfigMap(ctx context.Contex
 			if err := r.Update(ctx, &existingConfigMap); err != nil {
 				return err
 			}
-			logger.Info("updated runtime coordinator ConfigMap",
+			logger.Info(
+				"updated runtime coordinator ConfigMap",
 				"name", existingConfigMap.Name,
 				"namespace", existingConfigMap.Namespace,
 			)
 		} else {
-			logger.Info("runtime coordinator ConfigMap already up to date",
+			logger.Info(
+				"runtime coordinator ConfigMap already up to date",
 				"name", existingConfigMap.Name,
 				"namespace", existingConfigMap.Namespace,
 			)
@@ -242,7 +275,7 @@ func buildDesiredInstrumentation(demo *platformv1alpha1.AgentObservabilityDemo, 
 		},
 		Spec: otelv1alpha1.InstrumentationSpec{
 			Exporter: otelv1alpha1.Exporter{
-				Endpoint: demo.Spec.Instrumentation.OTelCollectorEndpoint,
+				Endpoint: collectorEndpointForDemo(demo),
 			},
 			Python: otelv1alpha1.Python{
 				Image: demo.Spec.Instrumentation.CustomPythonImage,
@@ -272,6 +305,7 @@ func buildDesiredRuntimeCoordinatorConfigMap(demo *platformv1alpha1.AgentObserva
 
 func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDemo, namespace string) string {
 	serviceName := desiredServiceName(demo)
+	collectorEndpoint := collectorEndpointForDemo(demo)
 
 	lines := []string{
 		"runtimeCoordinator:",
@@ -292,7 +326,9 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 		"  suppression:",
 		fmt.Sprintf("    disableDuplicateInstrumentations: %t", demo.Spec.RuntimeCoordinator.Suppression.DisableDuplicateInstrumentations),
 		"telemetry:",
-		fmt.Sprintf("  exporterEndpoint: %s", yamlStringValue(demo.Spec.Instrumentation.OTelCollectorEndpoint)),
+		fmt.Sprintf("  exporterEndpoint: %s", yamlStringValue(collectorEndpoint)),
+		fmt.Sprintf("  tracesEndpoint: %s", yamlStringValue(collectorTracesEndpointForDemo(demo))),
+		fmt.Sprintf("  protocol: %s", yamlStringValue(defaultCollectorProtocol)),
 		fmt.Sprintf("  serviceName: %s", yamlStringValue(serviceName)),
 		fmt.Sprintf("  serviceNamespace: %s", yamlStringValue(namespace)),
 		fmt.Sprintf("  deploymentName: %s", yamlStringValue(demo.Spec.Target.WorkloadName)),
@@ -351,10 +387,15 @@ func prepareDeploymentForInstrumentation(demo *platformv1alpha1.AgentObservabili
 
 func desiredContainerEnvVars(demo *platformv1alpha1.AgentObservabilityDemo, workloadNamespace, configMapName string) []corev1.EnvVar {
 	serviceName := desiredServiceName(demo)
+	collectorEndpoint := collectorEndpointForDemo(demo)
+	collectorTracesEndpoint := collectorTracesEndpointForDemo(demo)
 	resourceAttributes := fmt.Sprintf("service.name=%s,service.namespace=%s,k8s.namespace.name=%s,k8s.deployment.name=%s", serviceName, workloadNamespace, workloadNamespace, demo.Spec.Target.WorkloadName)
 
 	return []corev1.EnvVar{
-		{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: demo.Spec.Instrumentation.OTelCollectorEndpoint},
+		{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: collectorEndpoint},
+		{Name: "OTEL_EXPORTER_OTLP_PROTOCOL", Value: defaultCollectorProtocol},
+		{Name: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", Value: collectorTracesEndpoint},
+		{Name: "DEMO_OTLP_TRACES_ENDPOINT", Value: collectorTracesEndpoint},
 		{Name: "OTEL_SERVICE_NAME", Value: serviceName},
 		{Name: "OTEL_RESOURCE_ATTRIBUTES", Value: resourceAttributes},
 		{Name: runtimeCoordinatorConfigPathEnvName, Value: runtimeCoordinatorConfigDir + "/" + runtimeCoordinatorConfigMapKey},
@@ -461,6 +502,21 @@ func yamlStringValue(value string) string {
 		return `""`
 	}
 	return fmt.Sprintf("%q", value)
+}
+
+func collectorEndpointForDemo(demo *platformv1alpha1.AgentObservabilityDemo) string {
+	if strings.TrimSpace(demo.Spec.Instrumentation.OTelCollectorEndpoint) == "" {
+		return defaultCollectorEndpoint
+	}
+	return strings.TrimRight(strings.TrimSpace(demo.Spec.Instrumentation.OTelCollectorEndpoint), "/")
+}
+
+func collectorTracesEndpointForDemo(demo *platformv1alpha1.AgentObservabilityDemo) string {
+	endpoint := collectorEndpointForDemo(demo)
+	if strings.HasSuffix(endpoint, "/v1/traces") {
+		return endpoint
+	}
+	return strings.TrimRight(endpoint, "/") + path.Clean("/v1/traces")
 }
 
 // SetupWithManager wires the controller into the manager.

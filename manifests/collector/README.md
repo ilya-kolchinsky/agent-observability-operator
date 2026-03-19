@@ -1,19 +1,14 @@
 # Collector Manifests
 
-This directory contains a single demo-friendly `OpenTelemetryCollector` custom resource for the local PoC.
-
-It is designed for the flow:
-
-```text
-app -> OTLP -> Collector -> Jaeger UI
-```
+This directory contains the OpenTelemetry Collector resources for the local PoC.
 
 Highlights:
 
-- Runs as one managed `Deployment` in the `observability` namespace.
-- Exposes OTLP over both gRPC (`4317`) and HTTP (`4318`).
-- Exports traces to the local Jaeger all-in-one instance.
-- Also uses the `debug` exporter so trace traffic is visible in Collector logs during local troubleshooting.
+- A managed `OpenTelemetryCollector` named `demo-collector` in the `observability` namespace.
+- OTLP receive endpoints on `4317` (gRPC) and `4318` (HTTP).
+- A stable alias Service named `agent-observability-collector` so apps and generated `Instrumentation` resources can use a predictable endpoint.
+- Trace export to `jaeger-collector.observability.svc.cluster.local:4317`.
+- A `debug` exporter to make trace flow visible in Collector logs during local verification.
 
 Install with:
 

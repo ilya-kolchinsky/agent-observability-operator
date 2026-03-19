@@ -1,10 +1,10 @@
-.PHONY: build kind-up install-deps install-otel-operator install-collector install-jaeger deploy demo clean
+.PHONY: build-images load-images-kind install-deps install-otel-operator install-collector install-jaeger deploy-operator deploy-demo-apps apply-sample-crs deploy port-forward-jaeger send-demo-traffic demo clean
 
-build:
-	@echo "TODO: build operator, images, and demo artifacts"
+build-images:
+	./scripts/build-images.sh
 
-kind-up:
-	@echo "TODO: create or reuse local kind cluster"
+load-images-kind:
+	./scripts/load-images-kind.sh
 
 install-deps:
 	./scripts/install-deps.sh
@@ -18,11 +18,24 @@ install-collector:
 install-jaeger:
 	./scripts/install-jaeger.sh
 
-deploy:
-	@echo "TODO: deploy operator, manifests, and demo resources"
+deploy-operator:
+	./scripts/deploy-operator.sh
 
-demo:
-	@echo "TODO: run end-to-end demo workflow"
+deploy-demo-apps:
+	./scripts/deploy-demo-apps.sh
+
+apply-sample-crs:
+	./scripts/apply-sample-crs.sh
+
+deploy: deploy-operator deploy-demo-apps apply-sample-crs
+
+port-forward-jaeger:
+	./scripts/port-forward-jaeger.sh
+
+send-demo-traffic:
+	./scripts/send-demo-traffic.sh
+
+demo: send-demo-traffic
 
 clean:
-	@echo "TODO: remove local PoC resources and artifacts"
+	./scripts/clean.sh

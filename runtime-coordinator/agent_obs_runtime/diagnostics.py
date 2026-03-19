@@ -63,4 +63,10 @@ def get_logger() -> logging.Logger:
 
 def emit_startup_summary(report: StartupReport) -> None:
     logger = get_logger()
+    logger.info(
+        "runtime_coordinator_mode_selected mode=%s reason=%s provider_policy=%s",
+        report.mode_decision.mode.value,
+        report.mode_decision.reason,
+        report.plan.provider_policy,
+    )
     logger.info(json.dumps(report.to_dict(), sort_keys=True, default=str))

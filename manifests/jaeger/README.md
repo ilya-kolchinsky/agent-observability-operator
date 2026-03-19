@@ -1,13 +1,13 @@
 # Jaeger Manifests
 
-This directory contains a minimal Jaeger all-in-one deployment for a local demo cluster.
+This directory contains the Jaeger all-in-one deployment for the local PoC.
 
 Included resources:
 
-- `observability` namespace.
-- `jaeger` deployment with OTLP enabled.
-- `jaeger-query` service for the UI on port `16686`.
-- `jaeger-collector` service exposing OTLP gRPC (`4317`) and HTTP (`4318`).
+- `observability` namespace
+- `jaeger` deployment with OTLP ingest enabled
+- `agent-observability-jaeger` UI service on port `16686`
+- `jaeger-collector` OTLP service on ports `4317` and `4318`
 
 Install with:
 
@@ -15,8 +15,8 @@ Install with:
 ./scripts/install-jaeger.sh
 ```
 
-A convenient way to open the UI locally is:
+Port-forward the UI locally with:
 
 ```bash
-kubectl port-forward -n observability svc/jaeger-query 16686:16686
+./scripts/port-forward-jaeger.sh
 ```

@@ -1,81 +1,124 @@
 # agent-observability-operator
 
-This proof-of-concept repository explores how a standalone Kubernetes operator can simplify OpenTelemetry-based auto-instrumentation for Python agent workloads. The goal is to give users a single custom resource that describes an agent deployment and lets the platform generate the supporting observability components, image conventions, and runtime behavior needed to capture traces with minimal manual setup.
+This repository is a standalone end-to-end PoC for Python agent observability on Kubernetes. It includes:
 
-The planned architecture centers on a custom operator that watches a user-facing custom resource and reconciles the resources required for the demo environment. Those resources include generated OpenTelemetry Instrumentation objects, a custom Python auto-instrumentation image with an embedded runtime coordinator, demo Python agent applications, an OpenTelemetry Collector, and a Jaeger backend for trace storage and visualization, all packaged with local Kubernetes manifests and helper scripts.
+- a custom `AgentObservabilityDemo` CRD and operator that prepare workloads for OpenTelemetry injection;
+- a runtime coordinator embedded in a custom Python auto-instrumentation image;
+- three demo FastAPI agent apps representing `no-existing`, `partial-existing`, and `full-existing` tracing ownership states;
+- mock downstream MCP and HTTP services to generate realistic spans; and
+- local manifests plus helper scripts that wire the full trace path from app -> Collector -> Jaeger.
 
-This PoC validates the deployment model and repository structure while also proving a key runtime idea: the image can ship instrumentation packages, but a coordinator inside the container still decides which instrumentors are actually activated at startup.
-
-## Runtime coordinator at a glance
-
-The runtime coordinator lives in `runtime-coordinator/` and is the policy engine for Python observability in this PoC.
-
-At process startup it:
-
-1. Loads runtime configuration from environment variables and an optional config file.
-2. Detects whether the application already appears to own tracing setup.
-3. Selects a coordination mode: `FULL`, `AUGMENT`, `REUSE_EXISTING`, or `OFF`.
-4. Builds an instrumentation plan describing what should be activated.
-5. Applies that plan safely and logs both selected mode and actions taken.
-
-Today the coordinator supports:
-
-- provider ownership heuristics based on tracer providers, processors/exporters, environment signals, and known framework tracing indicators
-- runtime activation control for FastAPI/ASGI ingress and `httpx`/`requests` egress
-- lightweight MCP wrapper activation for representative tool-call boundaries
-- optional LangChain and LangGraph activation paths when compatible packages are present
-- structured startup diagnostics describing detection, plan, and applied actions
-
-For implementation details and extension points, see `runtime-coordinator/README.md`.
-
-## Local dependency layer for the demo
-
-The current demo dependency path is:
+## End-to-end telemetry path
 
 ```text
-app -> OTLP -> Collector -> Jaeger UI
+agent app
+  -> OTLP HTTP (agent-observability-collector.observability.svc.cluster.local:4318)
+  -> OpenTelemetry Collector
+  -> Jaeger collector
+  -> Jaeger UI (agent-observability-jaeger.observability.svc.cluster.local:16686)
 ```
 
-This phase adds the Kubernetes-side dependencies needed for that path without yet wiring the custom operator into them.
+## Stable service names
 
-### What gets installed
+- Collector: `agent-observability-collector.observability.svc.cluster.local`
+- Jaeger UI: `agent-observability-jaeger.observability.svc.cluster.local`
+- Demo apps:
+  - `agent-no-existing.demo-apps.svc.cluster.local`
+  - `agent-partial-existing.demo-apps.svc.cluster.local`
+  - `agent-full-existing.demo-apps.svc.cluster.local`
+  - `mock-mcp-server.demo-apps.svc.cluster.local`
+  - `mock-external-http-service.demo-apps.svc.cluster.local`
 
-- **OpenTelemetry Operator** via raw upstream manifests applied by `kubectl` from `scripts/install-otel-operator.sh`.
-- **OpenTelemetry Collector** via `manifests/collector/collector.yaml`, running as a single demo instance managed by the OpenTelemetry Operator.
-- **Jaeger all-in-one** via `manifests/jaeger/jaeger.yaml`, with a ClusterIP service for the Jaeger UI and OTLP ingest ports enabled for the Collector.
+## Local kind workflow
 
-### Local demo install order
+Build and load images:
 
-A local kind cluster is the preferred target environment, though the scripts work against any current `kubectl` context.
+```bash
+make build-images
+make load-images-kind
+```
+
+Install the dependency layer:
 
 ```bash
 make install-deps
 ```
 
-Or install each dependency explicitly:
+Deploy the operator and demo apps, then apply the sample CRs:
 
 ```bash
-make install-otel-operator
-make install-jaeger
-make install-collector
+make deploy-operator
+make deploy-demo-apps
+make apply-sample-crs
 ```
 
-After installation, port-forward the UI locally if needed:
+Send traffic and open Jaeger:
 
 ```bash
-kubectl port-forward -n observability svc/jaeger-query 16686:16686
+make send-demo-traffic
+make port-forward-jaeger
 ```
 
-Then point instrumented apps at the Collector OTLP endpoint inside the cluster:
+Then browse to `http://127.0.0.1:16686`.
 
-- gRPC: `demo-collector-collector.observability.svc.cluster.local:4317`
-- HTTP: `http://demo-collector-collector.observability.svc.cluster.local:4318`
+## Verifying the PoC
+
+### 1. Verify the operator reconciled the CRs
+
+```bash
+kubectl get agentobservabilitydemos -n demo-apps
+kubectl logs -n agent-observability-system deployment/agent-observability-operator --tail=200
+```
+
+Look for log entries such as:
+
+- `reconciling AgentObservabilityDemo for end-to-end telemetry path`
+- `created Instrumentation resource`
+- `updated target Deployment for instrumentation injection`
+- `updated AgentObservabilityDemo status after reconciliation`
+
+### 2. Verify the OpenTelemetry Operator injected instrumentation
+
+```bash
+kubectl get pods -n demo-apps
+kubectl describe pod -n demo-apps <agent-pod-name>
+```
+
+Check the Pod annotations and environment for:
+
+- `instrumentation.opentelemetry.io/inject-python`
+- `instrumentation.opentelemetry.io/container-names`
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
+- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+
+### 3. Verify the runtime coordinator chose a mode
+
+```bash
+kubectl logs -n demo-apps deployment/agent-no-existing --tail=100
+kubectl logs -n demo-apps deployment/agent-partial-existing --tail=100
+kubectl logs -n demo-apps deployment/agent-full-existing --tail=100
+```
+
+The runtime coordinator emits a JSON startup summary containing `selected_mode` and `selection_reason`. Expected modes for the PoC are:
+
+- `agent-no-existing` -> `FULL`
+- `agent-partial-existing` -> `AUGMENT`
+- `agent-full-existing` -> `REUSE_EXISTING`
+
+### 4. Verify traces reached Jaeger
+
+```bash
+kubectl logs -n observability deployment/demo-collector-collector --tail=200
+kubectl port-forward -n observability svc/agent-observability-jaeger 16686:16686
+```
+
+The Collector uses both a `debug` exporter and an OTLP exporter to Jaeger, so the Collector logs should show trace export activity while the Jaeger UI should display spans for the demo agent services.
 
 ## Repository layout
 
-- `operator/` - Custom Kubernetes operator skeleton.
-- `runtime-coordinator/` - Python runtime policy engine that detects tracing ownership, selects a mode, builds an instrumentation plan, and activates supported instrumentation.
-- `custom-python-image/` - Docker image skeleton for Python auto-instrumentation and runtime coordinator integration.
-- `demo-apps/` - Example Python agent applications used in the PoC.
-- `manifests/` - Kubernetes manifests organized by component.
-- `scripts/` - Local workflow helper scripts.
+- `operator/` - Custom operator source and unit tests.
+- `runtime-coordinator/` - Python startup detection, mode selection, and activation logic.
+- `custom-python-image/` - Custom Python auto-instrumentation image.
+- `demo-apps/` - Demo agent and dependency services.
+- `manifests/` - Kubernetes resources for CRD, operator, Collector, Jaeger, demo apps, and sample CRs.
+- `scripts/` - Local workflow helpers for the end-to-end demo.

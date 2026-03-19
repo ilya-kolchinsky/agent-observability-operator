@@ -8,7 +8,7 @@ MANIFEST_PATH=${MANIFEST_PATH:-"${REPO_ROOT}/manifests/jaeger/jaeger.yaml"}
 cat <<MSG
 Installing Jaeger all-in-one from local manifests.
 - manifest: ${MANIFEST_PATH}
-- ui service: jaeger-query.observability.svc.cluster.local:16686
+- ui service: agent-observability-jaeger.observability.svc.cluster.local:16686
 MSG
 
 kubectl apply -f "${MANIFEST_PATH}"
