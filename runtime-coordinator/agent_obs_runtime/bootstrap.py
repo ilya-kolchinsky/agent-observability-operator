@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .actuation import ApplyResult, apply_plan
 from .config import LoadedConfig, RuntimeConfig, load_config
 from .detection import DetectionResult, detect_runtime_state
 from .diagnostics import StartupReport, emit_startup_summary
 from .mode import CoordinationMode, ModeDecision, select_mode
+from .plan import InstrumentationPlan, build_plan
 
 
 @dataclass(slots=True)
@@ -17,6 +19,8 @@ class BootstrapState:
     loaded_config: LoadedConfig
     detection: DetectionResult
     mode_decision: ModeDecision
+    plan: InstrumentationPlan
+    apply_result: ApplyResult
     warnings: list[str] = field(default_factory=list)
 
     def report(self) -> StartupReport:
@@ -24,13 +28,15 @@ class BootstrapState:
             loaded_config=self.loaded_config,
             detection=self.detection,
             mode_decision=self.mode_decision,
+            plan=self.plan,
+            apply_result=self.apply_result,
             warnings=self.warnings,
         )
 
 
 
 def bootstrap() -> BootstrapState:
-    """Run startup detection without allowing failures to break the app."""
+    """Run startup detection and actuation without allowing failures to break the app."""
 
     warnings: list[str] = []
     try:
@@ -51,10 +57,27 @@ def bootstrap() -> BootstrapState:
         warnings.append(f"mode_selection_failed:{exc}")
         mode_decision = ModeDecision(CoordinationMode.AUGMENT, "safe_fallback_after_mode_failure")
 
+    try:
+        plan = build_plan(loaded_config.config, detection, mode_decision.mode)
+    except Exception as exc:  # pragma: no cover - defensive path
+        warnings.append(f"plan_build_failed:{exc}")
+        plan = InstrumentationPlan(mode=CoordinationMode.OFF, provider_policy="noop")
+
+    try:
+        apply_result = apply_plan(plan, loaded_config.config)
+    except Exception as exc:  # pragma: no cover - defensive path
+        warnings.append(f"actuation_failed:{exc}")
+        apply_result = ApplyResult(
+            provider_policy=plan.provider_policy,
+            warnings=[f"actuation_unavailable:{exc}"],
+        )
+
     state = BootstrapState(
         loaded_config=loaded_config,
         detection=detection,
         mode_decision=mode_decision,
+        plan=plan,
+        apply_result=apply_result,
         warnings=warnings,
     )
 

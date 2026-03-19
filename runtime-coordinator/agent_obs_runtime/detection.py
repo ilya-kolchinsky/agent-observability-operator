@@ -1,8 +1,15 @@
-"""Lightweight tracing ownership detection heuristics."""
+"""Lightweight user-owned tracing detection heuristics.
+
+This module intentionally focuses on *application-owned* tracing signals such as a
+user-created provider, configured processors/exporters, or framework-specific tracing
+setups. It does not treat the mere presence of packages baked into our custom image as
+proof that the application is already instrumented.
+"""
 
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 from typing import Any
@@ -24,6 +31,33 @@ KNOWN_INDICATORS = {
     "opentelemetry_distro": "opentelemetry.distro",
     "opentelemetry_instrumentation": "opentelemetry.instrumentation",
 }
+FRAMEWORK_PACKAGES = {
+    "fastapi_present": "fastapi",
+    "asgi_present": "starlette",
+    "httpx_present": "httpx",
+    "requests_present": "requests",
+    "mcp_present": "mcp",
+    "langchain_present": "langchain",
+    "langgraph_present": "langgraph",
+}
+FRAMEWORK_INSTRUMENTATION_MODULES = {
+    "has_server_instrumentation": (
+        "opentelemetry.instrumentation.fastapi",
+        "opentelemetry.instrumentation.asgi",
+    ),
+    "has_http_instrumentation": (
+        "opentelemetry.instrumentation.requests",
+        "opentelemetry.instrumentation.httpx",
+    ),
+    "has_mcp_instrumentation": (
+        "opentelemetry.instrumentation.mcp",
+    ),
+    "has_langchain_instrumentation": (
+        "opentelemetry.instrumentation.langchain",
+        "langsmith",
+    ),
+    "has_langgraph_instrumentation": (),
+}
 
 
 @dataclass(slots=True)
@@ -36,6 +70,18 @@ class DetectionResult:
     processor_details: list[str] = field(default_factory=list)
     env_signals: dict[str, str] = field(default_factory=dict)
     instrumentation_indicators: list[str] = field(default_factory=list)
+    fastapi_present: bool = False
+    asgi_present: bool = False
+    httpx_present: bool = False
+    requests_present: bool = False
+    mcp_present: bool = False
+    langchain_present: bool = False
+    langgraph_present: bool = False
+    has_server_instrumentation: bool = False
+    has_http_instrumentation: bool = False
+    has_mcp_instrumentation: bool = False
+    has_langchain_instrumentation: bool = False
+    has_langgraph_instrumentation: bool = False
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -46,6 +92,11 @@ class DetectionResult:
                 self.has_processors_or_exporters,
                 bool(self.env_signals),
                 bool(self.instrumentation_indicators),
+                self.has_server_instrumentation,
+                self.has_http_instrumentation,
+                self.has_mcp_instrumentation,
+                self.has_langchain_instrumentation,
+                self.has_langgraph_instrumentation,
             ]
         )
 
@@ -57,13 +108,25 @@ class DetectionResult:
             "processor_details": self.processor_details,
             "env_signals": self.env_signals,
             "instrumentation_indicators": self.instrumentation_indicators,
+            "fastapi_present": self.fastapi_present,
+            "asgi_present": self.asgi_present,
+            "httpx_present": self.httpx_present,
+            "requests_present": self.requests_present,
+            "mcp_present": self.mcp_present,
+            "langchain_present": self.langchain_present,
+            "langgraph_present": self.langgraph_present,
+            "has_server_instrumentation": self.has_server_instrumentation,
+            "has_http_instrumentation": self.has_http_instrumentation,
+            "has_mcp_instrumentation": self.has_mcp_instrumentation,
+            "has_langchain_instrumentation": self.has_langchain_instrumentation,
+            "has_langgraph_instrumentation": self.has_langgraph_instrumentation,
             "warnings": self.warnings,
         }
 
 
 
 def detect_runtime_state(config: RuntimeConfig) -> DetectionResult:
-    """Run the enabled heuristics and capture the observed tracing signals."""
+    """Run enabled heuristics and capture observed tracing ownership signals."""
 
     result = DetectionResult()
     enabled = set(config.enabled_heuristics)
@@ -80,6 +143,12 @@ def detect_runtime_state(config: RuntimeConfig) -> DetectionResult:
             result.instrumentation_indicators.extend(_detect_known_indicators())
         except Exception as exc:  # pragma: no cover - defensive path
             result.warnings.append(f"known_indicator_detection_failed:{exc}")
+
+    try:
+        _detect_runtime_frameworks(result)
+        _detect_framework_instrumentation(result)
+    except Exception as exc:  # pragma: no cover - defensive path
+        result.warnings.append(f"framework_detection_failed:{exc}")
 
     return result
 
@@ -156,3 +225,34 @@ def _detect_known_indicators() -> list[str]:
         if found:
             matches.append(name)
     return matches
+
+
+
+def _detect_runtime_frameworks(result: DetectionResult) -> None:
+    for field_name, module_name in FRAMEWORK_PACKAGES.items():
+        setattr(result, field_name, _module_loaded_or_available(module_name))
+
+
+
+def _detect_framework_instrumentation(result: DetectionResult) -> None:
+    loaded_modules = set(sys.modules)
+    indicators = set(result.instrumentation_indicators)
+
+    for field_name, module_names in FRAMEWORK_INSTRUMENTATION_MODULES.items():
+        detected = any(module_name in loaded_modules for module_name in module_names)
+        if not detected:
+            detected = any(indicator.startswith("opentelemetry") for indicator in indicators) and field_name in {
+                "has_server_instrumentation",
+                "has_http_instrumentation",
+            }
+        setattr(result, field_name, detected)
+
+
+
+def _module_loaded_or_available(module_name: str) -> bool:
+    if module_name in sys.modules:
+        return True
+    try:
+        return find_spec(module_name) is not None
+    except ModuleNotFoundError:
+        return False
