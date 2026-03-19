@@ -1,0 +1,5 @@
+apiVersion: platform.example.com/v1alpha1
+kind: AgentObservability
+metadata:
+  name: sample-agent-observability
+spec: {}
