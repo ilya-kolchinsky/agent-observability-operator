@@ -2,5 +2,6 @@
 
 from .bootstrap import STATE, bootstrap
 from .mode import CoordinationMode
+from .plan import InstrumentationPlan, build_plan
 
-__all__ = ["STATE", "bootstrap", "CoordinationMode"]
+__all__ = ["STATE", "bootstrap", "CoordinationMode", "InstrumentationPlan", "build_plan"]

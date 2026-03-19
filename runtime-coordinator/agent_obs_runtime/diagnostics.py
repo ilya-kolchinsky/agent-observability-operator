@@ -5,11 +5,15 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .config import LoadedConfig
 from .detection import DetectionResult
 from .mode import ModeDecision
+
+if TYPE_CHECKING:
+    from .actuation import ApplyResult
+    from .plan import InstrumentationPlan
 
 LOGGER_NAME = "agent_obs_runtime"
 
@@ -21,6 +25,8 @@ class StartupReport:
     loaded_config: LoadedConfig
     detection: DetectionResult
     mode_decision: ModeDecision
+    plan: InstrumentationPlan
+    apply_result: ApplyResult
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -30,9 +36,13 @@ class StartupReport:
             "detected_signals": self.detection.to_dict(),
             "selected_mode": self.mode_decision.mode.value,
             "selection_reason": self.mode_decision.reason,
+            "instrumentation_plan": self.plan.to_dict(),
+            "applied_actions": self.apply_result.to_dict(),
             "warnings": [
                 *self.loaded_config.warnings,
                 *self.detection.warnings,
+                *self.plan.warnings,
+                *self.apply_result.warnings,
                 *self.warnings,
             ],
         }
