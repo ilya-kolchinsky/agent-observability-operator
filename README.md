@@ -1,14 +1,62 @@
 # agent-observability-operator
 
-This repository is a standalone end-to-end PoC for Python agent observability on Kubernetes. It includes:
+`agent-observability-operator` is a complete, self-contained proof of concept for **Python agent observability on Kubernetes**.
 
-- a custom `AgentObservabilityDemo` CRD and operator that prepare workloads for OpenTelemetry injection;
-- a runtime coordinator embedded in a custom Python auto-instrumentation image;
-- three demo FastAPI agent apps representing `no-existing`, `partial-existing`, and `full-existing` tracing ownership states;
-- mock downstream MCP and HTTP services to generate realistic spans; and
-- local manifests plus helper scripts that wire the full trace path from app -> Collector -> Jaeger.
+It shows how to take a user-facing custom resource, reconcile it into the OpenTelemetry resources and workload mutations needed for injection, start a **custom Python auto-instrumentation image**, make a **runtime coordinator** choose an instrumentation mode at process startup, and deliver traces end to end through an **OpenTelemetry Collector** into **Jaeger**.
 
-## End-to-end telemetry path
+The repository is designed to be understandable and runnable by another engineer without needing external glue code.
+
+## Problem statement
+
+Stock OpenTelemetry Operator injection is powerful, but it is **not sufficient by itself** for this agent observability use case.
+
+Why not:
+
+- **Injection alone does not provide a user-facing source of truth.** In this PoC, the platform contract is the custom `AgentObservabilityDemo` resource, not a manually authored `Instrumentation` object.
+- **Injection alone does not decide instrumentation ownership.** Python agent workloads may have no tracing, partial tracing signals, or fully user-owned tracing already in place. A blanket auto-instrumentation startup path risks duplicate spans, conflicting SDK setup, or overriding app-owned tracing.
+- **Injection alone does not express runtime coordination policy.** This PoC needs startup-time mode selection such as `FULL`, `AUGMENT`, and `REUSE_EXISTING`, based on heuristics about what the application already owns.
+- **Injection alone does not ship the custom runtime behavior.** The PoC uses a custom Python auto-instrumentation image that contains curated instrumentation packages plus a runtime coordinator invoked via `sitecustomize.py`.
+- **Injection alone does not prepare the workload the way this demo needs.** The custom operator patches the target workload, mounts runtime coordinator config, writes OTLP settings, and points the OTel Operator at the generated `Instrumentation` resource.
+
+In short: the standard OTel Operator remains an important part of the system, but this PoC demonstrates the extra control plane and runtime policy required to make agent observability safer and more intentional for Python workloads.
+
+## What this PoC demonstrates
+
+This repository demonstrates all of the following, end to end:
+
+- **custom CR as source of truth** via `AgentObservabilityDemo` resources that describe the target workload, generated instrumentation, and runtime coordinator settings.
+- **generated OpenTelemetry `Instrumentation` resources** created by the custom operator rather than managed manually by the user.
+- **Workload patching for OTel Operator injection** so Deployments are annotated and configured for Python auto-instrumentation.
+- **A custom Python auto-instrumentation image** that packages OTel libraries and instrumentors but delegates activation policy to the runtime coordinator.
+- **A runtime coordinator** that detects existing tracing ownership signals and chooses `FULL`, `AUGMENT`, or `REUSE_EXISTING` at startup.
+- **Collector + Jaeger backend wiring** so traces travel from the demo agent app to the OpenTelemetry Collector and then to Jaeger.
+- **three instrumentation ownership cases** represented by demo apps:
+  - `no-existing`: no tracing setup; coordinator should choose `FULL`
+  - `partial-existing`: some tracing ownership signals exist; coordinator should choose `AUGMENT`
+  - `full-existing`: app fully owns provider/exporter and some manual instrumentation; coordinator should choose `REUSE_EXISTING`
+
+## Architecture overview
+
+### End-to-end flow
+
+```mermaid
+flowchart TD
+    U[User applies AgentObservabilityDemo CR] --> O[Custom operator reconciles CR]
+    O --> I[Generated OpenTelemetry Instrumentation resource]
+    O --> P[Patch target Deployment annotations/env/volume mount]
+    I --> X[OpenTelemetry Operator sees injection config]
+    P --> X
+    X --> Y[Auto-instrumentation injected into workload Pod]
+    Y --> Z[Custom Python auto-instrumentation image starts]
+    Z --> R[Runtime coordinator detects existing instrumentation and selects mode]
+    R --> A[Demo FastAPI agent app handles requests and emits spans]
+    A --> C[OpenTelemetry Collector]
+    C --> J[Jaeger collector and storage]
+    J --> UI[Jaeger UI]
+    UI --> V[User inspects traces]
+```
+
+### Telemetry path
 
 ```text
 agent app
@@ -18,7 +66,7 @@ agent app
   -> Jaeger UI (agent-observability-jaeger.observability.svc.cluster.local:16686)
 ```
 
-## Stable service names
+### Stable service names
 
 - Collector: `agent-observability-collector.observability.svc.cluster.local`
 - Jaeger UI: `agent-observability-jaeger.observability.svc.cluster.local`
@@ -29,26 +77,66 @@ agent app
   - `mock-mcp-server.demo-apps.svc.cluster.local`
   - `mock-external-http-service.demo-apps.svc.cluster.local`
 
-## Demo walkthrough
+## Repository structure
 
-The most direct end-to-end path is:
+Top-level layout:
+
+- `README.md` - this runbook and architecture guide.
+- `Makefile` - high-level entry points for building, deploying, verifying, and running the demo.
+- `scripts/` - shell wrappers for the full PoC workflow, including cluster creation, dependency install, traffic generation, and verification.
+- `manifests/` - Kubernetes resources for the CRD, operator, collector, Jaeger, demo workloads, and sample custom resources.
+- `operator/` - custom Kubernetes operator and `AgentObservabilityDemo` API types.
+- `runtime-coordinator/` - Python runtime policy engine that detects ownership signals and decides instrumentation mode.
+- `custom-python-image/` - Docker build assets for the custom Python auto-instrumentation image.
+- `demo-apps/` - three FastAPI demo agents plus mock MCP and HTTP dependencies.
+
+A more detailed view:
+
+- `manifests/crd/` - CRD definition for `AgentObservabilityDemo`
+- `manifests/operator/` - operator deployment and RBAC
+- `manifests/collector/` - OpenTelemetry Collector deployment/config
+- `manifests/jaeger/` - Jaeger all-in-one deployment and services
+- `manifests/demo/` - demo app Deployments and Services
+- `manifests/samples/` - sample `AgentObservabilityDemo` CRs for the three scenarios
+- `demo-apps/common/` - shared LangGraph workflow, MCP client, logging, and tracing helpers
+
+## Build and run instructions
+
+### Prerequisites
+
+Install these locally before starting:
+
+- Docker
+- kind
+- kubectl
+- GNU make
+
+This PoC is designed around a **local kind cluster** and local Docker image builds.
+
+### Fast path
+
+If you want the shortest path through the entire demo:
 
 ```bash
 make demo-walkthrough
 ```
 
-That script chains the full local demo up through traffic generation, then tells you how to open Jaeger. If you want to walk the PoC step by step and verify each stage with your own eyes, use the commands below.
+That command chains cluster creation, dependency installation, image builds, kind image loading, operator deployment, demo app deployment, sample CR application, verification, and demo traffic generation.
 
-### 1. Start a local Kubernetes cluster with kind
+### Step-by-step runbook
+
+If you want to understand and verify each phase manually, use the steps below.
+
+#### 1. Start a local Kubernetes cluster with kind
 
 ```bash
 make create-kind-cluster
 kubectl get nodes
 ```
 
-Expected result: a `kind-control-plane` node is `Ready` and your current kubectl context is `kind-kind`.
+Expected result: a `kind-control-plane` node is `Ready` and your current `kubectl` context is `kind-kind`.
 
-### 2. Install dependencies
+#### 2. Install dependencies
 
 Install the OpenTelemetry Operator, the demo Collector, and Jaeger:
 
@@ -56,7 +144,7 @@ Install the OpenTelemetry Operator, the demo Collector, and Jaeger:
 make install-deps
 ```
 
-If you prefer the explicit order used by the walkthrough:
+If you prefer explicit control over the order:
 
 ```bash
 make install-otel-operator
@@ -64,32 +152,45 @@ make install-collector
 make install-jaeger
 ```
 
-### 3. Build and load images
+#### 3. Build all local images
 
 ```bash
 make build-images
+```
+
+This builds:
+
+- the custom operator image
+- the custom Python auto-instrumentation image
+- the three demo agent images
+- the mock MCP server image
+- the mock external HTTP service image
+
+#### 4. Load the built images into kind
+
+```bash
 make load-images-kind
 ```
 
-### 4. Deploy the custom operator
+#### 5. Deploy the custom operator
 
 ```bash
 make deploy-operator
 kubectl get pods -n agent-observability-system
 ```
 
-Expected result: the `agent-observability-operator` Deployment is `Available`.
+Expected result: the `agent-observability-operator` Deployment becomes `Available`.
 
-### 5. Deploy the demo app variants
+#### 6. Deploy the demo workloads
 
 ```bash
 make deploy-demo-apps
 kubectl get deployments -n demo-apps
 ```
 
-Expected result: the three agent Deployments plus the two mock dependency Deployments are `Available`.
+Expected result: the three demo agent Deployments plus the two mock dependency Deployments are `Available`.
 
-### 6. Apply the custom resources
+#### 7. Apply the sample custom resources
 
 ```bash
 make apply-sample-crs
@@ -98,7 +199,7 @@ kubectl get agentobservabilitydemos -n demo-apps
 
 Expected result: you see `no-existing`, `partial-existing`, and `full-existing`.
 
-### 7. Verify the generated `Instrumentation` resources exist
+#### 8. Verify generated `Instrumentation` resources
 
 ```bash
 kubectl get instrumentation -n demo-apps
@@ -107,13 +208,9 @@ kubectl get instrumentation partial-existing-instrumentation -n demo-apps
 kubectl get instrumentation full-existing-instrumentation -n demo-apps
 ```
 
-You can also run the automated verification helper:
+These are created by the custom operator from the user-facing custom resources.
 
-```bash
-make verify-demo
-```
-
-### 8. Verify the workload Pods were mutated for auto-instrumentation
+#### 9. Verify workload mutation for injection
 
 Inspect one of the agent Pods:
 
@@ -124,26 +221,36 @@ kubectl describe pod -n demo-apps <agent-pod-name>
 
 Look for all of the following:
 
-- the `instrumentation.opentelemetry.io/inject-python` annotation;
-- the `instrumentation.opentelemetry.io/container-names` annotation;
-- OpenTelemetry-related environment such as `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`; and
-- auto-instrumentation-related init container or injected instrumentation details from the OpenTelemetry Operator.
+- `instrumentation.opentelemetry.io/inject-python`
+- `instrumentation.opentelemetry.io/container-names`
+- OTLP-related environment variables such as `OTEL_EXPORTER_OTLP_ENDPOINT`
+- injected auto-instrumentation details from the OpenTelemetry Operator
+- mounted runtime coordinator configuration
 
-The helper target performs these checks for all three agent variants:
+#### 10. Run automated verification checks
 
 ```bash
 make verify-demo
 ```
 
-### 9. Send traffic to the demo agent endpoint
+This verifies:
+
+- the three custom resources exist
+- the generated `Instrumentation` resources exist
+- the operator logs show reconciliation activity
+- the workload Pods were mutated
+- the runtime coordinator selected the expected modes
+- Collector and Jaeger deployments are present
+
+#### 11. Send demo traffic
 
 ```bash
 make send-demo-traffic
 ```
 
-That script exercises `healthz`, `run`, and `stream` against all three demo agent services so there is data to inspect in the backend.
+This exercises `/healthz`, `/run`, and `/stream` across the three demo services so traces appear in the backend.
 
-### 10. Port-forward the Jaeger UI
+#### 12. Port-forward Jaeger
 
 ```bash
 make port-forward-jaeger
@@ -151,25 +258,52 @@ make port-forward-jaeger
 
 Then open `http://127.0.0.1:16686` in your browser.
 
-### 11. Open Jaeger and inspect traces
+## Demo walkthrough
 
-In Jaeger:
+The demo is most convincing when you follow the control-plane and runtime behavior in order.
 
-1. Search for the services `agent-no-existing`, `agent-partial-existing`, and `agent-full-existing`.
-2. Open a recent trace.
-3. Confirm the trace includes app spans plus downstream HTTP and MCP-related activity.
-4. Compare how the three services behave after the runtime coordinator chooses different ownership modes.
+### A. Observe the control-plane artifacts
 
-Optional cross-checks from the cluster side:
+After applying the sample CRs, confirm the custom resources and generated outputs:
 
 ```bash
-kubectl logs -n observability deployment/demo-collector-collector --tail=200
-kubectl logs -n agent-observability-system deployment/agent-observability-operator --tail=200
+kubectl get agentobservabilitydemos -n demo-apps -o wide
+kubectl get instrumentation -n demo-apps -o wide
+kubectl get configmap -n demo-apps | grep runtime
 ```
 
-### 12. Observe logs showing the runtime coordinator selected `FULL`, `AUGMENT`, and `REUSE_EXISTING`
+What you are proving here:
 
-Check each demo app directly:
+- the **user applied only `AgentObservabilityDemo` resources**
+- the **operator generated the OpenTelemetry `Instrumentation` resources**
+- the **operator generated runtime coordinator configuration**
+
+### B. Observe workload preparation
+
+Inspect the demo Deployments and one Pod from each scenario:
+
+```bash
+kubectl get deployment -n demo-apps agent-no-existing -o yaml
+kubectl get deployment -n demo-apps agent-partial-existing -o yaml
+kubectl get deployment -n demo-apps agent-full-existing -o yaml
+```
+
+Then:
+
+```bash
+kubectl get pods -n demo-apps
+kubectl describe pod -n demo-apps <pod-name>
+```
+
+What you are proving here:
+
+- the operator patched the target workload templates
+- the OTel Operator mutated Pods for Python auto-instrumentation
+- the Pods now have the config required to talk to the Collector
+
+### C. Observe runtime coordinator decisions
+
+Check logs for each demo app:
 
 ```bash
 kubectl logs -n demo-apps deployment/agent-no-existing --tail=200
@@ -177,7 +311,7 @@ kubectl logs -n demo-apps deployment/agent-partial-existing --tail=200
 kubectl logs -n demo-apps deployment/agent-full-existing --tail=200
 ```
 
-Look for the runtime coordinator JSON startup summary containing `selected_mode`.
+Look for startup diagnostics containing `selected_mode`.
 
 Expected mapping:
 
@@ -185,11 +319,86 @@ Expected mapping:
 - `agent-partial-existing` -> `AUGMENT`
 - `agent-full-existing` -> `REUSE_EXISTING`
 
-The helper target verifies this mapping automatically:
+This is the core runtime behavior the PoC exists to demonstrate.
+
+### D. Generate request traffic
 
 ```bash
-make verify-demo
+make send-demo-traffic
 ```
+
+This triggers the demo agent workflow, which includes:
+
+1. FastAPI ingress handling
+2. LangGraph workflow execution
+3. MCP tool calls to the mock MCP server
+4. outbound HTTP calls to the mock HTTP dependency
+5. response assembly back to the client
+
+### E. Inspect traces in Jaeger
+
+After port-forwarding Jaeger, search for these services:
+
+- `agent-no-existing`
+- `agent-partial-existing`
+- `agent-full-existing`
+
+Open a recent trace for each service and compare both the trace shape and the coordinator behavior reflected in logs.
+
+## Expected visible results in Jaeger
+
+The exact span names can vary by instrumentor version and the specific auto-instrumentation hooks active at runtime, but the visible pattern should be stable.
+
+### 1. `agent-no-existing` (`FULL`)
+
+This is the cleanest demonstration of platform-owned observability.
+
+You should expect:
+
+- a root server span for the FastAPI request (`/run` or `/stream`)
+- child spans representing outbound HTTP traffic to `mock-external-http-service`
+- spans or observable boundaries around MCP tool invocation activity
+- LangGraph-related activity visible through the PoC's lightweight runtime instrumentation path
+- a complete trace emitted through the Collector into Jaeger without the app providing its own tracing setup
+
+Interpretation: the app had no meaningful existing tracing ownership, so the runtime coordinator initialized and enabled the missing capabilities.
+
+### 2. `agent-partial-existing` (`AUGMENT`)
+
+This demonstrates coexistence with partial app-owned signals.
+
+You should expect:
+
+- a root server span for the FastAPI request
+- outbound HTTP and other missing spans added where the coordinator judged augmentation was safe
+- a trace shape similar to `no-existing`, but produced by a mode that tries to **reuse what is already present** and fill gaps rather than aggressively taking over
+- no obvious duplicate ingress spans if the coordinator's heuristics interpreted existing signals correctly
+
+Interpretation: the app presented partial ownership clues, so the runtime coordinator augmented instead of behaving like a fresh bootstrap.
+
+### 3. `agent-full-existing` (`REUSE_EXISTING`)
+
+This demonstrates app-owned tracing that the platform should not override.
+
+You should expect:
+
+- a root server span for the FastAPI request created by the application's own tracing setup
+- outbound `httpx` spans created by the app's own manual instrumentation
+- traces still flowing successfully to the Collector and Jaeger
+- fewer coordinator-added spans than the `FULL` case because the runtime coordinator should avoid activating standard instrumentors when it detects that the application already owns tracing
+
+Interpretation: the application already configured an OpenTelemetry tracer provider, exporter, and manual FastAPI/`httpx` instrumentation, so the coordinator reused the existing setup instead of taking control.
+
+### What to compare across the three services
+
+When comparing traces in Jaeger, focus on these questions:
+
+- Do all three services produce traces end to end?
+- Does `no-existing` show the platform taking full responsibility?
+- Does `partial-existing` still produce useful traces without obvious duplication?
+- Does `full-existing` preserve app-owned tracing behavior while still exporting to the same backend?
+
+That comparison is the central value of the PoC.
 
 ## Troubleshooting
 
@@ -278,11 +487,24 @@ make verify-demo
   kubectl get svc,pods -n observability | grep jaeger
   ```
 
-## Repository layout
+## Known limitations
 
-- `operator/` - Custom operator source and unit tests.
-- `runtime-coordinator/` - Python startup detection, mode selection, and activation logic.
-- `custom-python-image/` - Custom Python auto-instrumentation image.
-- `demo-apps/` - Demo agent and dependency services.
-- `manifests/` - Kubernetes resources for CRD, operator, Collector, Jaeger, demo apps, and sample CRs.
-- `scripts/` - Local workflow helpers for the end-to-end demo.
+This is intentionally a PoC and does **not** claim production completeness.
+
+Current limitations include:
+
+- **Heuristic detection is simplified.** The runtime coordinator uses lightweight heuristics rather than deep semantic certainty.
+- **Partial/full detection is approximate.** The difference between `AUGMENT` and `REUSE_EXISTING` is inferred from signals and is not guaranteed to be perfect.
+- **Support is limited to demo apps and selected Python flows.** The PoC focuses on FastAPI/ASGI, `httpx`, `requests`, MCP boundaries, and selected LangChain/LangGraph-style flows.
+- **Jaeger all-in-one is for demo only.** It is convenient for local validation, but it is not a production backend architecture.
+- **Jaeger uses ephemeral storage by default.** Trace data is not durable across teardown/redeploy cycles unless you intentionally change the backend configuration.
+
+## Additional module docs
+
+If you want more implementation detail, these module-level docs are useful next reads:
+
+- `operator/README.md`
+- `runtime-coordinator/README.md`
+- `custom-python-image/README.md`
+- `demo-apps/README.md`
+- `manifests/README.md`
