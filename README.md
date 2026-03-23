@@ -86,6 +86,7 @@ Top-level layout:
 - `scripts/` - shell wrappers for the full PoC workflow, including cluster creation, dependency install, traffic generation, and verification.
 - `manifests/` - Kubernetes resources for the CRD, operator, collector, Jaeger, demo workloads, and sample custom resources.
 - `operator/` - custom Kubernetes operator and `AgentObservabilityDemo` API types.
+  - The Go operator module uses real upstream Kubernetes, controller-runtime, logr, and OpenTelemetry Operator dependencies rather than local stub replacements.
 - `runtime-coordinator/` - Python runtime policy engine that detects ownership signals and decides instrumentation mode.
 - `custom-python-image/` - Docker build assets for the custom Python auto-instrumentation image.
 - `demo-apps/` - three FastAPI demo agents plus mock MCP and HTTP dependencies.
@@ -113,6 +114,10 @@ Install these locally before starting:
 
 This PoC is designed around a **local kind cluster** and local Docker image builds.
 
+### Operator dependency note
+
+The Go operator in `operator/` is a real controller-runtime module. It now depends on released upstream Kubernetes libraries plus the real OpenTelemetry Operator Go API for `Instrumentation` resources, and it no longer routes runnable behavior through local stub modules.
+
 ### Fast path
 
 If you want the shortest path through the entire demo:
@@ -122,6 +127,14 @@ make demo-walkthrough
 ```
 
 That command chains cluster creation, dependency installation, image builds, kind image loading, operator deployment, demo app deployment, sample CR application, verification, and demo traffic generation.
+
+If you only want to validate the operator module locally before running the full PoC, use:
+
+```bash
+make operator-check-local
+```
+
+This builds the operator packages and image, and when a Kubernetes context is available it confirms the manager stays up long enough to catch the earlier "stubbed manager exits immediately" class of regression.
 
 ### Step-by-step runbook
 
