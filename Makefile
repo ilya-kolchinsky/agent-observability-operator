@@ -1,4 +1,4 @@
-.PHONY: create-kind-cluster build-images load-images-kind install-deps install-otel-operator install-collector install-jaeger deploy-operator deploy-demo-apps apply-sample-crs deploy verify-demo port-forward-jaeger send-demo-traffic demo-walkthrough demo clean
+.PHONY: create-kind-cluster build-images load-images-kind install-deps install-otel-operator install-collector install-jaeger deploy-operator deploy-demo-apps apply-sample-crs deploy verify-demo port-forward-jaeger send-demo-traffic demo-walkthrough demo operator-check-local clean
 
 create-kind-cluster:
 	./scripts/create-kind-cluster.sh
@@ -45,6 +45,9 @@ demo-walkthrough:
 	./scripts/demo.sh
 
 demo: demo-walkthrough
+
+operator-check-local:
+	./scripts/check-operator-local.sh
 
 clean:
 	./scripts/clean.sh

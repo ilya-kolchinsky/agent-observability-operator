@@ -1,8 +1,7 @@
-FROM golang:1.22 AS builder
+FROM golang:1.25 AS builder
 WORKDIR /workspace/operator
 
 COPY operator/go.mod ./go.mod
-COPY operator/stubs ./stubs
 COPY operator/api ./api
 COPY operator/internal ./internal
 COPY operator/main.go ./main.go
