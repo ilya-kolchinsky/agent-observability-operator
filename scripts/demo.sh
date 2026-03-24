@@ -28,6 +28,21 @@ step '6. Deploy demo app variants'
 step '7. Apply the custom AgentObservabilityDemo resources'
 "${SCRIPT_DIR}/apply-sample-crs.sh"
 
+step '7b. Wait for operator to reconcile and create Instrumentation resources'
+printf 'Waiting for Instrumentation resources to be created...\n'
+for demo in no-existing partial-existing full-existing; do
+  timeout=30
+  while ! kubectl get instrumentation "${demo}-instrumentation" -n demo-apps >/dev/null 2>&1; do
+    if [ $timeout -le 0 ]; then
+      echo "ERROR: Timeout waiting for Instrumentation/${demo}-instrumentation"
+      exit 1
+    fi
+    sleep 1
+    timeout=$((timeout - 1))
+  done
+  echo "✓ Instrumentation/${demo}-instrumentation created"
+done
+
 step '8. Verify generated resources and pod mutation before sending traffic'
 "${SCRIPT_DIR}/verify-demo.sh"
 
