@@ -1,104 +1,135 @@
-"""Safe bootstrap entrypoint for the runtime coordinator."""
+"""Bootstrap module - orchestrate detection and instrumentation."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+import logging
+import os
+from typing import Any
 
-from .actuation import ApplyResult, apply_plan
-from .config import LoadedConfig, RuntimeConfig, load_config
-from .detection import DetectionResult, detect_runtime_state
-from .diagnostics import StartupReport, emit_startup_summary
-from .mode import CoordinationMode, ModeDecision, select_mode
-from .plan import InstrumentationPlan, build_plan
+from .detection import (
+    detect_state,
+    should_initialize_provider,
+    should_instrument_fastapi,
+    should_instrument_httpx,
+    should_instrument_requests,
+    should_instrument_langchain,
+    should_instrument_langgraph,
+    should_instrument_mcp,
+)
+from .instrumentation import (
+    initialize_tracer_provider,
+    instrument_fastapi,
+    instrument_httpx,
+    instrument_requests,
+    instrument_langchain,
+    instrument_langgraph,
+    instrument_mcp,
+)
 
-
-@dataclass(slots=True)
-class BootstrapState:
-    """State produced by bootstrap for downstream callers."""
-
-    loaded_config: LoadedConfig
-    detection: DetectionResult
-    mode_decision: ModeDecision
-    plan: InstrumentationPlan
-    apply_result: ApplyResult
-    warnings: list[str] = field(default_factory=list)
-
-    def report(self) -> StartupReport:
-        return StartupReport(
-            loaded_config=self.loaded_config,
-            detection=self.detection,
-            mode_decision=self.mode_decision,
-            plan=self.plan,
-            apply_result=self.apply_result,
-            warnings=self.warnings,
-        )
+LOGGER = logging.getLogger(__name__)
 
 
+def bootstrap(config: dict[str, Any] | None = None) -> None:
+    """Main entry point for runtime coordinator."""
+    if config is None:
+        config = _load_config()
 
-def bootstrap() -> BootstrapState:
-    """Run startup detection and actuation without allowing failures to break the app."""
+    # Check if coordinator is enabled
+    if not config.get("enabled", True):
+        _emit_diagnostics("coordinator_disabled", {})
+        return
 
-    warnings: list[str] = []
+    # Detect current state
+    detection = detect_state()
+
+    # Emit diagnostics
+    _emit_diagnostics("detection_complete", {
+        "detection": detection.to_dict(),
+        "decisions": {
+            "initialize_provider": should_initialize_provider(detection),
+            "instrument_fastapi": should_instrument_fastapi(detection),
+            "instrument_httpx": should_instrument_httpx(detection),
+            "instrument_requests": should_instrument_requests(detection),
+            "instrument_langchain": should_instrument_langchain(detection),
+            "instrument_langgraph": should_instrument_langgraph(detection),
+            "instrument_mcp": should_instrument_mcp(detection),
+        }
+    })
+
+    # Make instrumentation decisions
+    if should_initialize_provider(detection):
+        initialize_tracer_provider(config)
+
+    if should_instrument_fastapi(detection):
+        instrument_fastapi()
+
+    if should_instrument_httpx(detection):
+        instrument_httpx()
+
+    if should_instrument_requests(detection):
+        instrument_requests()
+
+    if should_instrument_langchain(detection):
+        instrument_langchain()
+
+    if should_instrument_langgraph(detection):
+        instrument_langgraph()
+
+    if should_instrument_mcp(detection):
+        instrument_mcp()
+
+
+def _load_config() -> dict[str, Any]:
+    """Load configuration from environment or file."""
+    config: dict[str, Any] = {
+        "enabled": os.getenv("RUNTIME_COORDINATOR_ENABLED", "true").lower() == "true",
+        "service_name": os.getenv("OTEL_SERVICE_NAME", "unknown-service"),
+        "service_namespace": os.getenv("SERVICE_NAMESPACE", "default"),
+        "deployment_name": os.getenv("DEPLOYMENT_NAME"),
+        "exporter_endpoint": os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        "traces_endpoint": os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+    }
+
+    # Try to load from file if specified
+    config_file = os.getenv("RUNTIME_COORDINATOR_CONFIG_FILE")
+    if config_file and os.path.exists(config_file):
+        try:
+            import yaml
+            with open(config_file) as f:
+                file_config = yaml.safe_load(f)
+                if file_config and "runtimeCoordinator" in file_config:
+                    rc_config = file_config["runtimeCoordinator"]
+                    config["enabled"] = rc_config.get("enabled", config["enabled"])
+                if file_config and "telemetry" in file_config:
+                    telemetry = file_config["telemetry"]
+                    config["service_name"] = telemetry.get("serviceName", config["service_name"])
+                    config["service_namespace"] = telemetry.get("serviceNamespace", config["service_namespace"])
+                    config["deployment_name"] = telemetry.get("deploymentName", config["deployment_name"])
+                    config["exporter_endpoint"] = telemetry.get("exporterEndpoint", config["exporter_endpoint"])
+                    config["traces_endpoint"] = telemetry.get("tracesEndpoint", config["traces_endpoint"])
+        except Exception as exc:
+            LOGGER.warning(f"Failed to load config from file: {exc}")
+
+    return config
+
+
+def _emit_diagnostics(event: str, data: dict[str, Any]) -> None:
+    """Emit diagnostics to log file and stderr."""
+    diagnostics = {
+        "event": event,
+        "data": data,
+    }
+
+    message = json.dumps(diagnostics, indent=2)
+
+    # Log to file
     try:
-        loaded_config = load_config()
-    except Exception as exc:  # pragma: no cover - defensive path
-        warnings.append(f"config_load_failed:{exc}")
-        loaded_config = LoadedConfig(config=RuntimeConfig(), config_source="defaults")
-
-    try:
-        detection = detect_runtime_state(loaded_config.config)
-    except Exception as exc:  # pragma: no cover - defensive path
-        warnings.append(f"detection_failed:{exc}")
-        detection = DetectionResult(warnings=[f"detection_unavailable:{exc}"])
-
-    try:
-        mode_decision = select_mode(loaded_config.config, detection)
-    except Exception as exc:  # pragma: no cover - defensive path
-        warnings.append(f"mode_selection_failed:{exc}")
-        mode_decision = ModeDecision(CoordinationMode.AUGMENT, "safe_fallback_after_mode_failure")
-
-    try:
-        plan = build_plan(loaded_config.config, detection, mode_decision.mode)
-    except Exception as exc:  # pragma: no cover - defensive path
-        warnings.append(f"plan_build_failed:{exc}")
-        plan = InstrumentationPlan(mode=CoordinationMode.OFF, provider_policy="noop")
-
-    try:
-        apply_result = apply_plan(plan, loaded_config.config)
-    except Exception as exc:  # pragma: no cover - defensive path
-        warnings.append(f"actuation_failed:{exc}")
-        apply_result = ApplyResult(
-            provider_policy=plan.provider_policy,
-            warnings=[f"actuation_unavailable:{exc}"],
-        )
-
-    state = BootstrapState(
-        loaded_config=loaded_config,
-        detection=detection,
-        mode_decision=mode_decision,
-        plan=plan,
-        apply_result=apply_result,
-        warnings=warnings,
-    )
-
-    try:
-        emit_startup_summary(state.report())
+        log_file = os.getenv("RUNTIME_COORDINATOR_LOG_FILE", "/tmp/runtime-coordinator-diagnostics.log")
+        with open(log_file, "a") as f:
+            f.write(f"{message}\n")
     except Exception:
         pass
 
-    return state
-
-
-_STATE: BootstrapState | None = None
-
-
-def run() -> BootstrapState:
-    """Run bootstrap once and return the cached startup state."""
-
-    global _STATE
-    if _STATE is None:
-        _STATE = bootstrap()
-    return _STATE
-
-
-STATE = run()
+    # Log to stderr
+    print(f"[runtime-coordinator] {message}", file=__import__("sys").stderr, flush=True)

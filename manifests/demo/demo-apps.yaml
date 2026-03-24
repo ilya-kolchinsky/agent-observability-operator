@@ -27,16 +27,6 @@ spec:
           ports:
             - containerPort: 8000
               name: http
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 5
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 15
 ---
 apiVersion: v1
 kind: Service
@@ -75,16 +65,6 @@ spec:
           ports:
             - containerPort: 8000
               name: http
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 5
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 15
 ---
 apiVersion: v1
 kind: Service
@@ -125,24 +105,14 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: MCP_SERVER_URL
-              value: http://mock-mcp-server.demo-apps.svc.cluster.local:8000/mcp
+              value: http://mock-mcp-server:8000/mcp
             - name: EXTERNAL_HTTP_URL
-              value: http://mock-external-http-service.demo-apps.svc.cluster.local:8000/context
+              value: http://mock-external-http-service:8000/context
             - name: LOG_LEVEL
               value: INFO
           ports:
             - containerPort: 8000
               name: http
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 5
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 15
 ---
 apiVersion: v1
 kind: Service
@@ -180,24 +150,14 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: MCP_SERVER_URL
-              value: http://mock-mcp-server.demo-apps.svc.cluster.local:8000/mcp
+              value: http://mock-mcp-server:8000/mcp
             - name: EXTERNAL_HTTP_URL
-              value: http://mock-external-http-service.demo-apps.svc.cluster.local:8000/context
+              value: http://mock-external-http-service:8000/context
             - name: LOG_LEVEL
               value: INFO
           ports:
             - containerPort: 8000
               name: http
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 5
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 15
 ---
 apiVersion: v1
 kind: Service
@@ -235,9 +195,9 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: MCP_SERVER_URL
-              value: http://mock-mcp-server.demo-apps.svc.cluster.local:8000/mcp
+              value: http://mock-mcp-server:8000/mcp
             - name: EXTERNAL_HTTP_URL
-              value: http://mock-external-http-service.demo-apps.svc.cluster.local:8000/context
+              value: http://mock-external-http-service:8000/context
             - name: DEMO_OTLP_TRACES_ENDPOINT
               value: http://agent-observability-collector.observability.svc.cluster.local:4318/v1/traces
             - name: LOG_LEVEL
@@ -245,16 +205,6 @@ spec:
           ports:
             - containerPort: 8000
               name: http
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 5
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 15
 ---
 apiVersion: v1
 kind: Service

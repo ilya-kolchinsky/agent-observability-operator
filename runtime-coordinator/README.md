@@ -14,10 +14,9 @@ At import/startup time the coordinator performs a small pipeline:
 
 1. **Load config** from `AGENT_OBS_*` environment variables and an optional config file.
 2. **Detect runtime state** using heuristics focused on user/application-owned tracing, not on the mere presence of packages in the image.
-3. **Select a coordination mode** using the existing runtime mode chooser.
-4. **Build an instrumentation plan** describing what to activate.
-5. **Apply the plan** with defensive error handling so startup never crashes the application.
-6. **Emit structured diagnostics** including detected signals, selected mode, plan contents, and actions taken.
+3. **Make fine-grained instrumentation decisions** for each supported framework and component.
+4. **Apply the decisions** with defensive error handling so startup never crashes the application.
+5. **Emit structured diagnostics** including detected signals, individual decisions, and actions taken.
 
 The implementation is intentionally conservative and PoC-oriented: if a package or instrumentor is unavailable, the coordinator logs a skip instead of failing the app.
 
@@ -27,14 +26,11 @@ The main entrypoint is `agent_obs_runtime.bootstrap`.
 
 ### 1. Configuration
 
-The coordinator currently loads the following settings via `AGENT_OBS_*` environment variables or an optional config file:
+The coordinator currently loads configuration via environment variables and mounted config files from the operator:
 
-- `AGENT_OBS_MODE` - explicit mode override (`FULL`, `AUGMENT`, `REUSE_EXISTING`, `OFF`)
-- `AGENT_OBS_DIAGNOSTICS_LEVEL` - diagnostics verbosity selector
-- `AGENT_OBS_ENABLED_HEURISTICS` - comma-separated list of enabled detection heuristics
-- `AGENT_OBS_ENABLED_PATCHERS` - comma-separated list of instrumentation targets to allow
-- `AGENT_OBS_SUPPRESSION_SETTINGS` - JSON mapping for suppression/disable controls
-- `AGENT_OBS_CONFIG_FILE` - path to a JSON or simple TOML-like config file
+- Service name, namespace, and deployment metadata
+- Collector endpoints for OTLP export
+- Optional feature flags and overrides
 
 If loading fails, the coordinator falls back to defaults and records a warning.
 
@@ -51,49 +47,35 @@ Detection is intentionally focused on **tracing ownership** signals such as:
 
 This distinction matters: the custom image may contain OpenTelemetry and instrumentor packages, but that does **not** mean the user app has already chosen or activated instrumentation.
 
-### 3. Mode selection
+### 3. Fine-grained decision making
 
-The coordinator supports four modes:
+The coordinator makes independent decisions for each instrumentation target:
 
-- `FULL` - initialize tracing and activate supported instrumentation targets
-- `AUGMENT` - reuse an existing provider if present and only add missing capabilities
-- `REUSE_EXISTING` - avoid activating standard instrumentors and leave tracing ownership to the app
-- `OFF` - do nothing except emit diagnostics
+- **`should_initialize_provider()`** - Initialize a TracerProvider if only ProxyTracerProvider is present
+- **`should_instrument_fastapi()`** - Instrument FastAPI if available and not already instrumented
+- **`should_instrument_httpx()`** - Instrument httpx if available and not already instrumented
+- **`should_instrument_requests()`** - Instrument requests if available and not already instrumented
+- **`should_instrument_langchain()`** - Instrument LangChain if available and not already instrumented
+- **`should_instrument_langgraph()`** - Instrument LangGraph if available and not already instrumented
+- **`should_instrument_mcp()`** - Instrument MCP boundaries if available and not already instrumented
 
-The existing mode-selection logic remains the source of truth; the coordinator extends it by adding planning and actuation after the mode is chosen.
+Decision rules are simple and defensive:
 
-### 4. Instrumentation planning
+- Don't instrument what's already instrumented
+- Don't instrument what isn't available
+- Do initialize a provider if the app hasn't configured one yet
 
-`agent_obs_runtime.plan` converts the selected mode plus detection signals into an `InstrumentationPlan`.
+### 4. Actuation
 
-The plan currently records:
+`agent_obs_runtime.instrumentation` applies each decision safely.
 
-- the selected mode
-- provider policy: `initialize`, `reuse`, or `noop`
-- whether to enable FastAPI/ASGI ingress instrumentation
-- whether to enable `httpx`
-- whether to enable `requests`
-- whether to enable MCP wrapping
-- whether to enable LangChain
-- whether to enable LangGraph
-- plan warnings
+#### Provider initialization
 
-Rules are intentionally simple:
+If `should_initialize_provider()` returns true, the coordinator:
 
-- `FULL` enables supported targets allowed by config and initializes a provider
-- `REUSE_EXISTING` reuses the app/provider and skips standard activations
-- `AUGMENT` enables only capabilities that appear to be missing
-- `OFF` disables all activation
-
-### 5. Actuation
-
-`agent_obs_runtime.actuation` applies the plan safely.
-
-#### Provider behavior
-
-- `initialize` attempts to install a default OpenTelemetry SDK tracer provider and attach a span processor/exporter if the SDK is available
-- `reuse` never overrides the existing provider
-- `noop` skips provider setup
+- Installs a default OpenTelemetry SDK tracer provider
+- Attaches a span processor/exporter configured to send traces to the collector
+- Never overrides an existing configured provider
 
 #### Supported runtime targets
 
@@ -107,18 +89,16 @@ All activations are wrapped in defensive error handling. The coordinator logs wh
 
 ## Diagnostics output
 
-Startup diagnostics are emitted as structured JSON through the `agent_obs_runtime` logger.
+Startup diagnostics are emitted as structured JSON to stderr and a diagnostics log file.
 
 The current report includes:
 
-- loaded configuration and config source
-- detected tracing and framework signals
-- selected mode and selection reason
-- instrumentation plan contents
-- applied actions
-- accumulated warnings
+- loaded configuration
+- detected tracing and framework signals (provider state, framework availability, instrumentation state)
+- individual instrumentation decisions for each framework
+- warnings encountered during detection or actuation
 
-This makes it easy to explain behavior differences across `FULL`, `AUGMENT`, `REUSE_EXISTING`, and `OFF` runs.
+This makes it easy to understand which instrumentations were activated and why.
 
 ## Supported instrumentation in this PoC
 
@@ -136,9 +116,9 @@ This is enough to demonstrate runtime control without trying to support every Py
 
 The coordinator is designed around startup safety:
 
-- it does not rewrite the existing mode-selection logic
 - it treats missing optional packages as normal
-- it avoids overriding an app-owned provider in reuse modes
+- it avoids overriding an app-owned provider
+- it never instruments what's already instrumented
 - it favors skip-with-logging over hard failure
 - it keeps monkeypatching shallow and narrowly targeted
 - it emits diagnostics even when parts of the startup pipeline fail
@@ -187,25 +167,18 @@ Examples:
 
 Relevant files:
 
-- `agent_obs_runtime/bootstrap.py` - startup orchestration
-- `agent_obs_runtime/config.py` - configuration loading
-- `agent_obs_runtime/detection.py` - tracing ownership and framework heuristics
-- `agent_obs_runtime/mode.py` - mode selection
-- `agent_obs_runtime/plan.py` - instrumentation planning
-- `agent_obs_runtime/actuation.py` - plan application
-- `agent_obs_runtime/mcp_instrumentation.py` - lightweight MCP wrapping
-- `agent_obs_runtime/langchain_langgraph_instrumentation.py` - LangChain/LangGraph support
-- `agent_obs_runtime/diagnostics.py` - structured startup reporting
-- `src/runtime_coordinator/main.py` - package entrypoint used by the image
+- `agent_obs_runtime/bootstrap.py` - startup orchestration and diagnostics
+- `agent_obs_runtime/detection.py` - tracing ownership and framework detection, plus decision functions
+- `agent_obs_runtime/instrumentation.py` - instrumentation actuation for all supported frameworks
 
 ## Limitations
 
 This remains a PoC. Notable limitations include:
 
 - no broad framework coverage beyond the small supported set
-- heuristic duplicate detection rather than deep certainty
+- heuristic duplicate detection rather than deep semantic certainty
 - best-effort provider initialization rather than a production-ready SDK bootstrap story
 - minimal monkeypatch-based integrations for MCP and LangGraph
-- no operator-driven configuration wiring yet
+- timing issue: the coordinator runs at sitecustomize time, before the application's main.py, so it cannot detect what the application will set up later
 
 Those tradeoffs are intentional for this phase: the goal is to demonstrate controlled runtime activation, not a complete production observability platform.

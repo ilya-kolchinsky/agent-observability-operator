@@ -14,7 +14,7 @@ Why not:
 
 - **Injection alone does not provide a user-facing source of truth.** In this PoC, the platform contract is the custom `AgentObservabilityDemo` resource, not a manually authored `Instrumentation` object.
 - **Injection alone does not decide instrumentation ownership.** Python agent workloads may have no tracing, partial tracing signals, or fully user-owned tracing already in place. A blanket auto-instrumentation startup path risks duplicate spans, conflicting SDK setup, or overriding app-owned tracing.
-- **Injection alone does not express runtime coordination policy.** This PoC needs startup-time mode selection such as `FULL`, `AUGMENT`, and `REUSE_EXISTING`, based on heuristics about what the application already owns.
+- **Injection alone does not express runtime coordination policy.** This PoC needs startup-time instrumentation decisions for each framework and component, based on detection of what's already configured or instrumented.
 - **Injection alone does not ship the custom runtime behavior.** The PoC uses a custom Python auto-instrumentation image that contains curated instrumentation packages plus a runtime coordinator invoked via `sitecustomize.py`.
 - **Injection alone does not prepare the workload the way this demo needs.** The custom operator patches the target workload, mounts runtime coordinator config, writes OTLP settings, and points the OTel Operator at the generated `Instrumentation` resource.
 
@@ -28,12 +28,12 @@ This repository demonstrates all of the following, end to end:
 - **generated OpenTelemetry `Instrumentation` resources** created by the custom operator rather than managed manually by the user.
 - **Workload patching for OTel Operator injection** so Deployments are annotated and configured for Python auto-instrumentation.
 - **A custom Python auto-instrumentation image** that packages OTel libraries and instrumentors but delegates activation policy to the runtime coordinator.
-- **A runtime coordinator** that detects existing tracing ownership signals and chooses `FULL`, `AUGMENT`, or `REUSE_EXISTING` at startup.
+- **A runtime coordinator** that detects existing tracing ownership signals and makes fine-grained instrumentation decisions at startup.
 - **Collector + Jaeger backend wiring** so traces travel from the demo agent app to the OpenTelemetry Collector and then to Jaeger.
 - **three instrumentation ownership cases** represented by demo apps:
-  - `no-existing`: no tracing setup; coordinator should choose `FULL`
-  - `partial-existing`: some tracing ownership signals exist; coordinator should choose `AUGMENT`
-  - `full-existing`: app fully owns provider/exporter and some manual instrumentation; coordinator should choose `REUSE_EXISTING`
+  - `no-existing`: no tracing setup; coordinator should initialize provider and instrument all available frameworks
+  - `partial-existing`: some tracing ownership signals exist; coordinator should make selective decisions
+  - `full-existing`: app fully owns provider/exporter and some manual instrumentation; coordinator should respect existing setup
 
 ## Architecture overview
 
@@ -252,7 +252,7 @@ This verifies:
 - the generated `Instrumentation` resources exist
 - the operator logs show reconciliation activity
 - the workload Pods were mutated
-- the runtime coordinator selected the expected modes
+- the runtime coordinator made the expected instrumentation decisions
 - Collector and Jaeger deployments are present
 
 #### 11. Send demo traffic
@@ -324,15 +324,19 @@ kubectl logs -n demo-apps deployment/agent-partial-existing --tail=200
 kubectl logs -n demo-apps deployment/agent-full-existing --tail=200
 ```
 
-Look for startup diagnostics containing `selected_mode`.
+Look for startup diagnostics containing `detection_complete` with the `decisions` object.
 
-Expected mapping:
+The coordinator makes independent decisions for:
 
-- `agent-no-existing` -> `FULL`
-- `agent-partial-existing` -> `AUGMENT`
-- `agent-full-existing` -> `REUSE_EXISTING`
+- `initialize_provider` - whether to initialize a TracerProvider
+- `instrument_fastapi` - whether to instrument FastAPI
+- `instrument_httpx` - whether to instrument httpx client
+- `instrument_requests` - whether to instrument requests library
+- `instrument_langchain` - whether to instrument LangChain (if available)
+- `instrument_langgraph` - whether to instrument LangGraph
+- `instrument_mcp` - whether to instrument MCP boundaries
 
-This is the core runtime behavior the PoC exists to demonstrate.
+This fine-grained decision-making is the core runtime behavior the PoC exists to demonstrate.
 
 ### D. Generate request traffic
 
@@ -362,7 +366,7 @@ Open a recent trace for each service and compare both the trace shape and the co
 
 The exact span names can vary by instrumentor version and the specific auto-instrumentation hooks active at runtime, but the visible pattern should be stable.
 
-### 1. `agent-no-existing` (`FULL`)
+### 1. `agent-no-existing`
 
 This is the cleanest demonstration of platform-owned observability.
 
@@ -374,44 +378,43 @@ You should expect:
 - LangGraph-related activity visible through the PoC's lightweight runtime instrumentation path
 - a complete trace emitted through the Collector into Jaeger without the app providing its own tracing setup
 
-Interpretation: the app had no meaningful existing tracing ownership, so the runtime coordinator initialized and enabled the missing capabilities.
+Interpretation: the app had no meaningful existing tracing ownership, so the runtime coordinator initialized a provider and enabled all available instrumentations.
 
-### 2. `agent-partial-existing` (`AUGMENT`)
+### 2. `agent-partial-existing`
 
 This demonstrates coexistence with partial app-owned signals.
 
 You should expect:
 
 - a root server span for the FastAPI request
-- outbound HTTP and other missing spans added where the coordinator judged augmentation was safe
-- a trace shape similar to `no-existing`, but produced by a mode that tries to **reuse what is already present** and fill gaps rather than aggressively taking over
-- no obvious duplicate ingress spans if the coordinator's heuristics interpreted existing signals correctly
+- outbound HTTP and other spans added by the coordinator
+- a trace shape potentially similar to `no-existing`, depending on what the coordinator detects
+- decisions may vary based on timing: since sitecustomize runs before main.py, the coordinator cannot see what the app will configure later
 
-Interpretation: the app presented partial ownership clues, so the runtime coordinator augmented instead of behaving like a fresh bootstrap.
+Interpretation: the app includes tracing setup in its main.py, but the coordinator runs earlier at sitecustomize time.
 
-### 3. `agent-full-existing` (`REUSE_EXISTING`)
+### 3. `agent-full-existing`
 
-This demonstrates app-owned tracing that the platform should not override.
+This demonstrates app-owned tracing that the platform should ideally not override.
 
 You should expect:
 
-- a root server span for the FastAPI request created by the application's own tracing setup
-- outbound `httpx` spans created by the app's own manual instrumentation
-- traces still flowing successfully to the Collector and Jaeger
-- fewer coordinator-added spans than the `FULL` case because the runtime coordinator should avoid activating standard instrumentors when it detects that the application already owns tracing
+- a root server span for the FastAPI request
+- outbound spans from HTTP clients
+- traces flowing successfully to the Collector and Jaeger
+- similar instrumentation to other cases due to the sitecustomize timing issue: the coordinator cannot yet detect what main.py will configure
 
-Interpretation: the application already configured an OpenTelemetry tracer provider, exporter, and manual FastAPI/`httpx` instrumentation, so the coordinator reused the existing setup instead of taking control.
+Interpretation: the application configures tracing in main.py, but this runs after sitecustomize where the coordinator makes decisions.
 
 ### What to compare across the three services
 
 When comparing traces in Jaeger, focus on these questions:
 
 - Do all three services produce traces end to end?
-- Does `no-existing` show the platform taking full responsibility?
-- Does `partial-existing` still produce useful traces without obvious duplication?
-- Does `full-existing` preserve app-owned tracing behavior while still exporting to the same backend?
+- Does the coordinator make reasonable instrumentation decisions based on detected state?
+- Are traces exported successfully to the collector and visible in Jaeger?
 
-That comparison is the central value of the PoC.
+**Note**: Currently all three services show similar instrumentation decisions due to the sitecustomize timing issue - the coordinator runs before the application's main.py, so it cannot detect what the app will configure later. This architectural limitation is acknowledged and will be addressed in future iterations.
 
 ## Troubleshooting
 
@@ -506,8 +509,8 @@ This is intentionally a PoC and does **not** claim production completeness.
 
 Current limitations include:
 
+- **Timing issue: sitecustomize runs before main.py.** The runtime coordinator executes at sitecustomize time, before the application's main.py runs. This means it cannot detect what instrumentation the application will configure later, causing all three demo apps to show identical decisions despite having different tracing setups in their main.py files.
 - **Heuristic detection is simplified.** The runtime coordinator uses lightweight heuristics rather than deep semantic certainty.
-- **Partial/full detection is approximate.** The difference between `AUGMENT` and `REUSE_EXISTING` is inferred from signals and is not guaranteed to be perfect.
 - **Support is limited to demo apps and selected Python flows.** The PoC focuses on FastAPI/ASGI, `httpx`, `requests`, MCP boundaries, and selected LangChain/LangGraph-style flows.
 - **Jaeger all-in-one is for demo only.** It is convenient for local validation, but it is not a production backend architecture.
 - **Jaeger uses ephemeral storage by default.** Trace data is not durable across teardown/redeploy cycles unless you intentionally change the backend configuration.

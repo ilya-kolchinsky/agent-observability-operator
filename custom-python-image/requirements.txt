@@ -5,3 +5,5 @@ opentelemetry-instrumentation-fastapi>=0.51b0,<1.0
 opentelemetry-instrumentation-asgi>=0.51b0,<1.0
 opentelemetry-instrumentation-httpx>=0.51b0,<1.0
 opentelemetry-instrumentation-requests>=0.51b0,<1.0
+opentelemetry-instrumentation-langchain>=0.51b0,<1.0
+PyYAML>=6.0,<7.0

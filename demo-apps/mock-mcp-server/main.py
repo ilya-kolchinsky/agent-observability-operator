@@ -15,6 +15,8 @@ MCP_SERVER = FastMCP(
     stateless_http=True,
     json_response=True,
     streamable_http_path="/",
+    host="0.0.0.0",
+    port=8000,
 )
 
 

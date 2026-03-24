@@ -396,11 +396,10 @@ func desiredContainerEnvVars(demo *platformv1alpha1.AgentObservabilityDemo, work
 		{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: collectorEndpoint},
 		{Name: "OTEL_EXPORTER_OTLP_PROTOCOL", Value: defaultCollectorProtocol},
 		{Name: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", Value: collectorTracesEndpoint},
-		{Name: "DEMO_OTLP_TRACES_ENDPOINT", Value: collectorTracesEndpoint},
-		{Name: "OTEL_SERVICE_NAME", Value: serviceName},
 		{Name: "OTEL_RESOURCE_ATTRIBUTES", Value: resourceAttributes},
 		{Name: runtimeCoordinatorConfigPathEnvName, Value: runtimeCoordinatorConfigDir + "/" + runtimeCoordinatorConfigMapKey},
 		{Name: "RUNTIME_COORDINATOR_CONFIG_MAP", Value: configMapName},
+		{Name: "PYTHONPATH", Value: "/otel-auto-instrumentation-python/opentelemetry/instrumentation/auto_instrumentation:/otel-auto-instrumentation-python:/app"},
 	}
 }
 
