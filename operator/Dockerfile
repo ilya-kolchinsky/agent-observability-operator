@@ -2,6 +2,7 @@ FROM golang:1.25 AS builder
 WORKDIR /workspace/operator
 
 COPY operator/go.mod ./go.mod
+COPY operator/go.sum ./go.sum
 COPY operator/api ./api
 COPY operator/internal ./internal
 COPY operator/main.go ./main.go

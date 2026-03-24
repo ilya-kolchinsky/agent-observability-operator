@@ -274,6 +274,7 @@ func buildDesiredInstrumentation(demo *platformv1alpha1.AgentObservabilityDemo, 
 			},
 		},
 		Spec: otelv1alpha1.InstrumentationSpec{
+		    ImagePullPolicy: corev1.PullIfNotPresent,
 			Exporter: otelv1alpha1.Exporter{
 				Endpoint: collectorEndpointForDemo(demo),
 			},

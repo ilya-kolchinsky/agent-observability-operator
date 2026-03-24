@@ -26,7 +26,7 @@ require_grep() {
   local pattern=$2
   shift 2
 
-  if "$@" | grep -Eq "${pattern}"; then
+  if "$@" | grep -E "${pattern}"; then
     echo "PASS: ${description}"
   else
     echo "FAIL: ${description}" >&2
