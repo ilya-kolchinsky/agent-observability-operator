@@ -18,8 +18,7 @@ spec:
     fastapi: true             # Platform instruments FastAPI
     httpx: true               # Platform instruments httpx
     requests: true            # Platform instruments requests
-    langchain: true           # Platform instruments LangChain (if available)
-    langgraph: true           # Platform instruments LangGraph
+    langchain: true           # Platform instruments LangChain
     mcp: true                 # Platform instruments MCP
 ---
 # Sample 2: PARTIAL EXISTING tracing - Mixed ownership
@@ -42,9 +41,8 @@ spec:
     fastapi: false            # App instruments FastAPI in main.py
     httpx: true               # Platform handles httpx
     requests: true            # Platform handles requests
-    langchain: false          # Not used in demo
-    langgraph: true           # Platform handles LangGraph
-    mcp: true                 # Platform handles MCP (app doesn't instrument it)
+    langchain: false          # App instruments LangChain in main.py
+    mcp: true                 # Platform handles MCP
 ---
 # Sample 3: FULL EXISTING tracing - App owns EVERYTHING
 # Demo: App has complete tracing setup, platform stays out of the way
@@ -67,5 +65,4 @@ spec:
     httpx: false
     requests: false
     langchain: false
-    langgraph: false
     mcp: false

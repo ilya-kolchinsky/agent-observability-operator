@@ -47,6 +47,34 @@ cd runtime-coordinator
 python -m pytest tests/
 ```
 
+## Prerequisites
+
+### Ollama LLM (required for demo agents)
+
+The demo agents use Ollama running locally on your host machine for better performance. This is required before running the demo.
+
+**Install Ollama:**
+```bash
+# macOS
+brew install ollama
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Or download from https://ollama.com/download
+```
+
+**Start Ollama and pull the model:**
+```bash
+# Start Ollama server (keep running in a separate terminal)
+ollama serve
+
+# In another terminal, pull the phi model
+ollama pull phi
+```
+
+The demo agents connect to Ollama at `http://host.docker.internal:11434` (which kind automatically maps to your host machine).
+
 ## Development Workflow
 
 ### Full demo cycle
@@ -61,7 +89,7 @@ make install-deps
 make build-images
 make load-images-kind
 make deploy-operator
-make deploy-demo-apps
+make deploy-demo-apps  # Ensure ollama is running first!
 make apply-sample-crs
 make verify-demo
 make send-demo-traffic
@@ -116,7 +144,6 @@ The coordinator makes independent decisions for each instrumentation target:
 - **instrument_httpx**: Instrument httpx if available and not already instrumented
 - **instrument_requests**: Instrument requests if available and not already instrumented
 - **instrument_langchain**: Instrument LangChain if available and not already instrumented
-- **instrument_langgraph**: Instrument LangGraph if available and not already instrumented
 - **instrument_mcp**: Instrument MCP boundaries if available and not already instrumented
 
 ### Operator code structure
@@ -169,7 +196,8 @@ All three demo agents share the same workload (FastAPI + LangGraph + MCP + httpx
 - **Operator only patches Deployment workloads** in this PoC (not StatefulSets/DaemonSets)
 - **Operator uses ConfigMap-based coordinator config** rather than encoding everything in env vars
 - **Runtime coordinator is PoC-focused** with simplified heuristics, not production-grade semantic analysis
-- **Supported Python frameworks**: FastAPI, ASGI, httpx, requests, MCP boundaries, LangChain, LangGraph
+- **Supported Python frameworks**: FastAPI, ASGI, httpx, requests, MCP boundaries, LangChain
+- **Ollama runs on host machine** - demo agents connect to `http://host.docker.internal:11434` for better LLM performance
 - **Local kind cluster only** - images are built locally and loaded into kind, not pushed to a registry
 
 ## Telemetry Path
@@ -263,4 +291,24 @@ make send-demo-traffic
 Check Jaeger pod is healthy:
 ```bash
 kubectl get pods -n observability
+```
+
+### Agent pods failing to start or timing out
+
+Check if Ollama is running and reachable:
+```bash
+# Verify Ollama is running locally
+curl http://localhost:11434/api/tags
+
+# Check agent logs for connection errors
+kubectl logs -n demo-apps deployment/agent-no-existing --tail=50
+```
+
+If Ollama is not running:
+```bash
+# Start Ollama server
+ollama serve
+
+# Pull the phi model (in another terminal)
+ollama pull phi
 ```

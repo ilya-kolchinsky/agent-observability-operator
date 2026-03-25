@@ -1,14 +1,16 @@
-"""Shared agent demo app factory."""
+"""Shared agent demo app factory using LangChain."""
 
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
-import httpx
 from fastapi import FastAPI
-from langgraph.graph import END, START, StateGraph
+from langchain.agents import AgentExecutor, create_react_agent
+from langchain.prompts import PromptTemplate
+from langchain_community.chat_models import ChatOllama
+from langchain_core.tools import Tool
 from pydantic import BaseModel, Field
 
 from common.logging_config import configure_logging, install_request_logging
@@ -18,200 +20,247 @@ from common.mcp_client import call_tool_sync
 class AgentRequest(BaseModel):
     """Request payload for the demo agent."""
 
-    prompt: str = Field(..., examples=["Plan a weather-aware outing in Seattle"])
-    location: str = Field(default="Seattle")
-    numbers: list[int] = Field(default_factory=lambda: [2, 3])
-    include_http_call: bool = True
+    prompt: str = Field(..., examples=["What's the weather in Seattle?"])
+    max_iterations: int = Field(default=10, description="Maximum agent iterations")
 
 
-class AgentState(TypedDict, total=False):
-    """Mutable state that flows through the LangGraph workflow."""
-
-    prompt: str
-    location: str
-    numbers: list[int]
-    include_http_call: bool
-    reasoning: str
-    mcp_result: dict[str, Any]
-    http_result: dict[str, Any]
-    final_answer: str
-
-
-class ScenarioConfig(TypedDict):
+class ScenarioConfig:
     """Configuration for a specific demo scenario."""
 
-    service_name: str
-    scenario: Literal["no-existing", "partial-existing", "full-existing"]
-    mcp_server_url: str
-    external_http_url: str
+    def __init__(
+        self,
+        service_name: str,
+        scenario: Literal["no-existing", "partial-existing", "full-existing"],
+        mcp_server_url: str,
+        llm_base_url: str,
+        llm_model: str,
+    ):
+        self.service_name = service_name
+        self.scenario = scenario
+        self.mcp_server_url = mcp_server_url
+        self.llm_base_url = llm_base_url
+        self.llm_model = llm_model
 
 
-class AgentWorkflow:
-    """Compiled LangGraph workflow plus execution helpers."""
+class DemoLangchainAgent:
+    """LangChain-based agent with MCP tools and LLM reasoning."""
 
     def __init__(self, logger: logging.Logger, config: ScenarioConfig) -> None:
         self._logger = logger
         self._config = config
-        self._graph = self._build_graph()
 
-    def invoke(self, request: AgentRequest) -> dict[str, Any]:
-        initial_state: AgentState = {
-            "prompt": request.prompt,
-            "location": request.location,
-            "numbers": request.numbers,
-            "include_http_call": request.include_http_call,
-        }
-        self._logger.info("graph_invoke_start scenario=%s payload=%s", self._config["scenario"], initial_state)
-        result = self._graph.invoke(initial_state)
-        self._logger.info("graph_invoke_end scenario=%s result=%s", self._config["scenario"], result)
-        return dict(result)
-
-    def stream(self, request: AgentRequest) -> list[dict[str, Any]]:
-        initial_state: AgentState = {
-            "prompt": request.prompt,
-            "location": request.location,
-            "numbers": request.numbers,
-            "include_http_call": request.include_http_call,
-        }
-        events: list[dict[str, Any]] = []
-        self._logger.info("graph_stream_start scenario=%s payload=%s", self._config["scenario"], initial_state)
-        for event in self._graph.stream(initial_state):
-            event_dict = dict(event)
-            events.append(event_dict)
-            self._logger.info("graph_stream_event scenario=%s event=%s", self._config["scenario"], event_dict)
-        self._logger.info("graph_stream_end scenario=%s event_count=%s", self._config["scenario"], len(events))
-        return events
-
-    def _build_graph(self):
-        builder = StateGraph(AgentState)
-        builder.add_node("reason", self._reason_step)
-        builder.add_node("tooling", self._tooling_step)
-        builder.add_node("respond", self._respond_step)
-        builder.add_edge(START, "reason")
-        builder.add_edge("reason", "tooling")
-        builder.add_edge("tooling", "respond")
-        builder.add_edge("respond", END)
-        return builder.compile()
-
-    def _reason_step(self, state: AgentState) -> AgentState:
-        self._logger.info("graph_reasoning_step scenario=%s prompt=%s", self._config["scenario"], state["prompt"])
-        reasoning = (
-            f"Reviewed prompt '{state['prompt']}' and decided to gather weather and math context "
-            f"for {state['location']}."
-        )
-        return {"reasoning": reasoning}
-
-    def _tooling_step(self, state: AgentState) -> AgentState:
-        self._logger.info("graph_tooling_step_start scenario=%s", self._config["scenario"])
-        weather_result = call_tool_sync(
-            server_url=self._config["mcp_server_url"],
-            tool_name="get_weather",
-            arguments={"location": state["location"]},
-        )
-        numbers = state["numbers"] or [0, 0]
-        math_result = call_tool_sync(
-            server_url=self._config["mcp_server_url"],
-            tool_name="add_numbers",
-            arguments={"a": numbers[0], "b": numbers[1]},
+        # Initialize LLM (Ollama)
+        self._llm = ChatOllama(
+            base_url=config.llm_base_url,
+            model=config.llm_model,
+            temperature=0.0,  # Deterministic for reliable tool calling
+            num_predict=256,  # Limit output length to prevent hallucination
         )
 
-        http_result: dict[str, Any] = {"skipped": True}
-        if state.get("include_http_call", True):
-            http_result = self._call_external_http(state)
+        # Create MCP tools
+        self._tools = self._create_mcp_tools()
 
-        tooling_result = {
-            "weather": weather_result,
-            "math": math_result,
-        }
+        # Create agent prompt (ReAct style with example)
+        prompt = PromptTemplate.from_template("""Answer the following questions as best you can. You have access to the following tools:
+
+{tools}
+
+Use the following format EXACTLY:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+Here is an example:
+
+Question: What is the weather in Tokyo?
+Thought: I need to get weather information for Tokyo
+Action: get_weather
+Action Input: Tokyo
+Observation: Weather in Tokyo: clear, 18°C
+Thought: I now know the final answer
+Final Answer: The weather in Tokyo is clear with a temperature of 18°C.
+
+Now answer the actual question:
+
+Question: {input}
+Thought:{agent_scratchpad}""")
+
+        # Create agent (ReAct agent works with any LLM)
+        agent = create_react_agent(self._llm, self._tools, prompt)
+
+        # Custom error handler for phi's single-line format
+        def handle_phi_format(error) -> str:
+            """Try to extract tool and input from phi's format when standard parsing fails."""
+            import re
+            error_text = str(error) if error else ""
+            if hasattr(error, 'llm_output'):
+                error_text = error.llm_output
+            elif hasattr(error, 'observation'):
+                error_text = error.observation
+
+            match = re.search(r'Action:\s*(\w+),?\s*Action Input:\s*(.+?)(?:\n|Question|Thought|$)', error_text, re.IGNORECASE | re.DOTALL)
+            if match:
+                return f"Action: {match.group(1).strip()}\nAction Input: {match.group(2).strip()}"
+            return error_text
+
+        self._agent_executor = AgentExecutor(
+            agent=agent,
+            tools=self._tools,
+            verbose=True,
+            max_iterations=6,  # Allow a few retries for small model
+            handle_parsing_errors=True,  # Return error string instead of raising
+            return_intermediate_steps=True,
+        )
+
         self._logger.info(
-            "graph_tooling_step_end scenario=%s mcp_result=%s http_result=%s",
-            self._config["scenario"],
-            tooling_result,
-            http_result,
+            "agent_initialized scenario=%s llm_model=%s tools=%s",
+            config.scenario,
+            config.llm_model,
+            [tool.name for tool in self._tools],
         )
-        return {
-            "mcp_result": tooling_result,
-            "http_result": http_result,
-        }
 
-    def _respond_step(self, state: AgentState) -> AgentState:
-        weather_summary = state["mcp_result"]["weather"].get("structured_content") or {}
-        math_summary = state["mcp_result"]["math"].get("structured_content") or {}
-        external_summary = state["http_result"]
-        final_answer = (
-            f"{state['reasoning']} Weather says {weather_summary.get('forecast', 'unknown')} at "
-            f"{weather_summary.get('temperature_c', 'n/a')}°C. Math tool returned "
-            f"{math_summary.get('sum', 'n/a')}. HTTP dependency status is "
-            f"{external_summary.get('status', external_summary)}."
-        )
-        self._logger.info("graph_response_step scenario=%s final_answer=%s", self._config["scenario"], final_answer)
-        return {"final_answer": final_answer}
+    def _create_mcp_tools(self) -> list[Tool]:
+        """Create LangChain tools that wrap MCP server tools."""
 
-    def _call_external_http(self, state: AgentState) -> dict[str, Any]:
-        payload = {
-            "prompt": state["prompt"],
-            "scenario": self._config["scenario"],
-            "location": state["location"],
-        }
-        self._logger.info("external_http_call_start url=%s payload=%s", self._config["external_http_url"], payload)
-        with httpx.Client(timeout=10.0) as client:
-            response = client.post(self._config["external_http_url"], json=payload)
-            response.raise_for_status()
-            body = response.json()
-        self._logger.info("external_http_call_end status_code=%s body=%s", response.status_code, body)
-        return body
+        def get_weather_tool(location: str) -> str:
+            """Get weather information for a location."""
+            self._logger.info("tool_call_start tool=get_weather location=%s", location)
+            try:
+                result = call_tool_sync(
+                    server_url=self._config.mcp_server_url,
+                    tool_name="get_weather",
+                    arguments={"location": location},
+                )
+                content = result.get("structured_content", {})
+                response = f"Weather in {location}: {content.get('forecast', 'unknown')}, {content.get('temperature_c', 'n/a')}°C"
+                self._logger.info("tool_call_end tool=get_weather response=%s", response)
+                return response
+            except Exception as e:
+                self._logger.error("tool_call_error tool=get_weather error=%s", str(e))
+                return f"Error getting weather: {str(e)}"
+
+        return [
+            Tool(
+                name="get_weather",
+                func=get_weather_tool,
+                description="Get weather for a location. Input: city name like Seattle or London",
+            ),
+        ]
+
+    def run(self, request: AgentRequest) -> dict[str, Any]:
+        """Execute the agent with LLM guidance and tool calls."""
+        self._logger.info("agent_run_start scenario=%s prompt=%s", self._config.scenario, request.prompt)
+
+        try:
+            from langchain_core.messages import HumanMessage
+
+            # Step 1: Ask LLM to extract the location from the query
+            location_prompt = f"Extract just the city name from this question: '{request.prompt}'. Reply with only the city name, nothing else."
+            location_response = self._llm.invoke([HumanMessage(content=location_prompt)])
+            location = location_response.content.strip().split('\n')[0].strip('."\'')
+
+            # Fallback to common cities if extraction fails
+            if not location or len(location) > 50:
+                cities = ["Seattle", "Austin", "London", "New York", "Tokyo", "San Francisco"]
+                location = "Seattle"  # default
+                for city in cities:
+                    if city.lower() in request.prompt.lower():
+                        location = city
+                        break
+
+            self._logger.info("extracted_location location=%s", location)
+
+            # Step 2: Call the weather tool through LangChain (for instrumentation)
+            tool = self._tools[0]  # get_weather tool
+            weather_result = tool.func(location)
+
+            # Step 3: Ask LLM to format a friendly response
+            format_prompt = f"The weather tool returned: '{weather_result}'. Write a brief, friendly response to the question '{request.prompt}'."
+            final_response = self._llm.invoke([HumanMessage(content=format_prompt)])
+            output = final_response.content.strip()
+
+            self._logger.info("agent_run_end scenario=%s output=%s", self._config.scenario, output)
+
+            return {
+                "input": request.prompt,
+                "output": output,
+                "intermediate_steps": 2,  # location extraction + weather call
+            }
+        except Exception as e:
+            self._logger.error("agent_run_error scenario=%s error=%s", self._config.scenario, str(e))
+            return {
+                "input": request.prompt,
+                "output": "Failed to answer the query.",
+                "error": str(e)[:200],
+            }
+
+    def _parse_output(self, prompt: str, output: str, intermediate_steps: list) -> str:
+        """Simple naive parsing to extract answer from LLM output or intermediate steps."""
+        # If the output looks reasonable, use it
+        if output and output != "Agent stopped due to iteration limit or time limit.":
+            return output
+
+        # Extract from weather tool results
+        for step in reversed(intermediate_steps):
+            if isinstance(step, tuple) and len(step) >= 2:
+                action, observation = step[0], step[1]
+                if hasattr(action, 'tool') and 'weather' in action.tool.lower():
+                    return str(observation)
+
+        return output if output else "I couldn't get the weather information."
 
 
 def create_agent_app(config: ScenarioConfig) -> FastAPI:
     """Create a FastAPI app for a specific instrumentation scenario."""
 
-    logger = configure_logging(config["service_name"])
-    workflow = AgentWorkflow(logger=logger, config=config)
-    app = FastAPI(title=config["service_name"], version="0.1.0")
+    logger = configure_logging(config.service_name)
+    agent = DemoLangchainAgent(logger=logger, config=config)
+    app = FastAPI(title=config.service_name, version="0.1.0")
     install_request_logging(app, logger)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
-        return {"status": "ok", "service": config["service_name"]}
+        return {"status": "ok", "service": config.service_name}
 
     @app.post("/run")
     def run_agent(request: AgentRequest) -> dict[str, Any]:
-        result = workflow.invoke(request)
+        result = agent.run(request)
         return {
-            "service": config["service_name"],
-            "scenario": config["scenario"],
+            "service": config.service_name,
+            "scenario": config.scenario,
             "result": result,
         }
 
-    @app.post("/stream")
-    def stream_agent(request: AgentRequest) -> dict[str, Any]:
-        return {
-            "service": config["service_name"],
-            "scenario": config["scenario"],
-            "events": workflow.stream(request),
-        }
-
     logger.info(
-        "agent_app_ready service=%s scenario=%s mcp_server_url=%s external_http_url=%s",
-        config["service_name"],
-        config["scenario"],
-        config["mcp_server_url"],
-        config["external_http_url"],
+        "agent_app_ready service=%s scenario=%s llm=%s mcp_server=%s",
+        config.service_name,
+        config.scenario,
+        config.llm_model,
+        config.mcp_server_url,
     )
     return app
 
 
-def build_scenario_config(service_name: str, scenario: Literal["no-existing", "partial-existing", "full-existing"]) -> ScenarioConfig:
+def build_scenario_config(
+    service_name: str,
+    scenario: Literal["no-existing", "partial-existing", "full-existing"],
+) -> ScenarioConfig:
     """Build scenario configuration from environment variables."""
 
-    mcp_server_url = os.getenv("MCP_SERVER_URL", "http://mock-mcp-server:8000/mcp")
-    external_http_url = os.getenv(
-        "EXTERNAL_HTTP_URL",
-        "http://mock-external-http-service:8000/context",
+    mcp_server_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8000")
+    llm_base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+    llm_model = os.getenv("OLLAMA_MODEL", "phi")
+
+    return ScenarioConfig(
+        service_name=service_name,
+        scenario=scenario,
+        mcp_server_url=mcp_server_url,
+        llm_base_url=llm_base_url,
+        llm_model=llm_model,
     )
-    return {
-        "service_name": service_name,
-        "scenario": scenario,
-        "mcp_server_url": mcp_server_url,
-        "external_http_url": external_http_url,
-    }

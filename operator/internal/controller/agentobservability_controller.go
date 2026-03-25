@@ -322,7 +322,6 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 		fmt.Sprintf("  httpx: %t", demo.Spec.Instrumentation.HTTPX),
 		fmt.Sprintf("  requests: %t", demo.Spec.Instrumentation.Requests),
 		fmt.Sprintf("  langchain: %t", demo.Spec.Instrumentation.LangChain),
-		fmt.Sprintf("  langgraph: %t", demo.Spec.Instrumentation.LangGraph),
 		fmt.Sprintf("  mcp: %t", demo.Spec.Instrumentation.MCP),
 		"telemetry:",
 		fmt.Sprintf("  exporterEndpoint: %s", yamlStringValue(collectorEndpoint)),

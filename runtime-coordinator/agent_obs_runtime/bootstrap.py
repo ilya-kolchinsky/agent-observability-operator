@@ -13,7 +13,6 @@ from .instrumentation import (
     instrument_httpx,
     instrument_requests,
     instrument_langchain,
-    instrument_langgraph,
     instrument_mcp,
 )
 
@@ -42,7 +41,6 @@ def bootstrap(config: dict[str, Any] | None = None) -> None:
             "instrument_httpx": instrumentation_config.get("httpx", False),
             "instrument_requests": instrumentation_config.get("requests", False),
             "instrument_langchain": instrumentation_config.get("langchain", False),
-            "instrument_langgraph": instrumentation_config.get("langgraph", False),
             "instrument_mcp": instrumentation_config.get("mcp", False),
         }
     })
@@ -79,12 +77,6 @@ def bootstrap(config: dict[str, Any] | None = None) -> None:
     else:
         LOGGER.info("Config disables LangChain instrumentation")
 
-    if instrumentation_config.get("langgraph", False):
-        LOGGER.info("Config enables LangGraph instrumentation")
-        instrument_langgraph()
-    else:
-        LOGGER.info("Config disables LangGraph instrumentation")
-
     if instrumentation_config.get("mcp", False):
         LOGGER.info("Config enables MCP instrumentation")
         instrument_mcp()
@@ -101,7 +93,6 @@ def _load_config() -> dict[str, Any]:
             "httpx": False,
             "requests": False,
             "langchain": False,
-            "langgraph": False,
             "mcp": False,
         },
         "telemetry": {
@@ -129,7 +120,6 @@ def _load_config() -> dict[str, Any]:
                     config["instrumentation"]["httpx"] = inst_config.get("httpx", False)
                     config["instrumentation"]["requests"] = inst_config.get("requests", False)
                     config["instrumentation"]["langchain"] = inst_config.get("langchain", False)
-                    config["instrumentation"]["langgraph"] = inst_config.get("langgraph", False)
                     config["instrumentation"]["mcp"] = inst_config.get("mcp", False)
                     LOGGER.info(f"Loaded instrumentation config from {config_file}")
 

@@ -11,8 +11,7 @@ for image in \
   demo-agent-no-existing \
   demo-agent-partial-existing \
   demo-agent-full-existing \
-  mock-mcp-server \
-  mock-external-http-service
+  mcp-server
 
 do
   echo "==> Loading ${IMAGE_PREFIX}/${image}:${TAG} into kind cluster ${KIND_CLUSTER_NAME}"

@@ -101,10 +101,6 @@ spec:
                       type: boolean
                       description: Enable LangChain instrumentation
                       default: false
-                    langgraph:
-                      type: boolean
-                      description: Enable LangGraph instrumentation
-                      default: false
                     mcp:
                       type: boolean
                       description: Enable MCP boundary instrumentation

@@ -75,8 +75,7 @@ check_config_decision() {
   local expected_instrument_httpx=$4
   local expected_instrument_requests=$5
   local expected_instrument_langchain=$6
-  local expected_instrument_langgraph=$7
-  local expected_instrument_mcp=$8
+  local expected_instrument_mcp=$7
 
   # Get diagnostics from the file
   diagnostics=$(kubectl exec -n "${DEMO_NAMESPACE}" deployment/"${workload}" -- cat /tmp/runtime-coordinator-diagnostics.log 2>/dev/null || echo "")
@@ -107,7 +106,6 @@ check_config_decision() {
   check_decision_value "instrument_httpx" "${expected_instrument_httpx}"
   check_decision_value "instrument_requests" "${expected_instrument_requests}"
   check_decision_value "instrument_langchain" "${expected_instrument_langchain}"
-  check_decision_value "instrument_langgraph" "${expected_instrument_langgraph}"
   check_decision_value "instrument_mcp" "${expected_instrument_mcp}"
 }
 
@@ -123,18 +121,17 @@ check_config_decision() {
 #   tracerProvider: platform → initialize_provider=true
 #   fastapi: false (app handles)
 #   httpx: true, requests: true
-#   langchain: false (not used)
-#   langgraph: true (platform handles)
+#   langchain: false (app handles)
 #   mcp: true (platform handles - app doesn't instrument it)
 #
 # agent-full-existing (app owns EVERYTHING):
 #   tracerProvider: app → initialize_provider=false
 #   All instrumentation flags: false (app handles everything)
 
-# Format: workload initialize_provider fastapi httpx requests langchain langgraph mcp
-check_config_decision agent-no-existing true true true true true true true
-check_config_decision agent-partial-existing true false true true false true true
-check_config_decision agent-full-existing false false false false false false false
+# Format: workload initialize_provider fastapi httpx requests langchain mcp
+check_config_decision agent-no-existing true true true true true true
+check_config_decision agent-partial-existing true false true true false true
+check_config_decision agent-full-existing false false false false false false
 
 log_step "Checking collector and Jaeger are reachable inside the cluster"
 require_resource "Collector deployment is available" kubectl get deployment demo-collector-collector -n "${OBS_NAMESPACE}"

@@ -121,32 +121,6 @@ def instrument_langchain() -> bool:
         return False
 
 
-def instrument_langgraph() -> bool:
-    """Instrument LangGraph by patching execution boundaries."""
-    try:
-        patched_methods = []
-        for module_name, class_name in _langgraph_targets():
-            try:
-                module = import_module(module_name)
-                compiled_graph_class = getattr(module, class_name, None)
-                if compiled_graph_class is None:
-                    continue
-
-                for method_name in ("invoke", "stream", "astream"):
-                    if _patch_langgraph_method(compiled_graph_class, method_name):
-                        patched_methods.append(f"{class_name}.{method_name}")
-            except Exception:
-                continue
-
-        if patched_methods:
-            LOGGER.info("Instrumented LangGraph", extra={"methods": patched_methods})
-            return True
-        return False
-    except Exception as exc:
-        LOGGER.debug("Failed to instrument LangGraph", extra={"error": str(exc)})
-        return False
-
-
 def instrument_mcp() -> bool:
     """Instrument MCP client by patching tool invocation."""
     try:
@@ -177,51 +151,6 @@ def instrument_mcp() -> bool:
     except Exception as exc:
         LOGGER.debug("Failed to instrument MCP", extra={"error": str(exc)})
         return False
-
-
-# Helper functions for LangGraph instrumentation
-
-def _langgraph_targets() -> tuple[tuple[str, str], ...]:
-    return (
-        ("langgraph.graph.graph", "CompiledGraph"),
-        ("langgraph.graph.state", "CompiledStateGraph"),
-    )
-
-
-def _patch_langgraph_method(target_class: type[Any], method_name: str) -> bool:
-    original = getattr(target_class, method_name, None)
-    if original is None or getattr(original, "_agent_obs_langgraph_instrumented", False):
-        return False
-
-    wrapped = _wrap_langgraph_call(original, method_name)
-    setattr(wrapped, "_agent_obs_langgraph_instrumented", True)
-    setattr(target_class, method_name, wrapped)
-    return True
-
-
-def _wrap_langgraph_call(func: Callable[..., Any], method_name: str) -> Callable[..., Any]:
-    tracer = _get_tracer("langgraph")
-
-    if isasyncgenfunction(func):
-        @wraps(func)
-        async def async_gen_wrapper(*args: Any, **kwargs: Any):
-            with _optional_span(tracer, f"langgraph.{method_name}"):
-                async for item in func(*args, **kwargs):
-                    yield item
-        return async_gen_wrapper
-
-    if iscoroutinefunction(func):
-        @wraps(func)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            with _optional_span(tracer, f"langgraph.{method_name}"):
-                return await func(*args, **kwargs)
-        return async_wrapper
-
-    @wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        with _optional_span(tracer, f"langgraph.{method_name}"):
-            return func(*args, **kwargs)
-    return wrapper
 
 
 # Helper functions for MCP instrumentation

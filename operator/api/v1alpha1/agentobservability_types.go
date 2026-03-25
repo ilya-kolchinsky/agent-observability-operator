@@ -39,9 +39,6 @@ type InstrumentationSpec struct {
 	// LangChain enables LangChain instrumentation
 	LangChain bool `json:"langchain,omitempty"`
 
-	// LangGraph enables LangGraph instrumentation
-	LangGraph bool `json:"langgraph,omitempty"`
-
 	// MCP enables MCP boundary instrumentation
 	MCP bool `json:"mcp,omitempty"`
 }

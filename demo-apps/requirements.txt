@@ -1,10 +1,13 @@
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.34,<1.0
 httpx>=0.28,<1.0
-langgraph>=0.2,<1.0
+langchain>=0.3,<1.0
+langchain-community>=0.3,<1.0
 mcp[cli]>=1.0,<2.0
 pydantic>=2.10,<3.0
 opentelemetry-sdk>=1.30,<2.0
 opentelemetry-exporter-otlp-proto-http>=1.30,<2.0
 opentelemetry-instrumentation-fastapi>=0.51b0,<1.0
 opentelemetry-instrumentation-httpx>=0.51b0,<1.0
+opentelemetry-instrumentation-requests>=0.51b0,<1.0
+opentelemetry-instrumentation-langchain>=0.51b0,<1.0

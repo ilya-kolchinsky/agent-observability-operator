@@ -52,40 +52,12 @@ try:
 except Exception:
     pass
 
-# Instrument agent-level frameworks (LangChain, LangGraph, MCP)
+# Instrument agent-level frameworks (LangChain, MCP)
 try:
     from opentelemetry.instrumentation.langchain import LangchainInstrumentor
     LangchainInstrumentor().instrument()
 except Exception:
     pass
-
-
-def _instrument_langgraph() -> None:
-    """Instrument LangGraph by patching execution boundaries."""
-    try:
-        tracer = trace.get_tracer("langgraph")
-        for module_name, class_name in (
-            ("langgraph.graph.graph", "CompiledGraph"),
-            ("langgraph.graph.state", "CompiledStateGraph"),
-        ):
-            try:
-                module = import_module(module_name)
-                cls = getattr(module, class_name, None)
-                if cls is None:
-                    continue
-
-                for method_name in ("invoke", "stream", "astream"):
-                    original = getattr(cls, method_name, None)
-                    if original is None or getattr(original, "_agent_obs_langgraph_instrumented", False):
-                        continue
-
-                    wrapped = _wrap_method(original, tracer, f"langgraph.{method_name}")
-                    setattr(wrapped, "_agent_obs_langgraph_instrumented", True)
-                    setattr(cls, method_name, wrapped)
-            except Exception:
-                continue
-    except Exception:
-        pass
 
 
 def _instrument_mcp() -> None:
@@ -139,7 +111,6 @@ def _wrap_method(func, tracer, span_name):
     return wrapper
 
 
-_instrument_langgraph()
 _instrument_mcp()
 
 app = create_agent_app(

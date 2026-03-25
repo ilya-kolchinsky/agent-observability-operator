@@ -16,11 +16,7 @@ for service in ${services}; do
   echo
   curl -fsS -X POST "http://${service}.demo-apps.svc.cluster.local:8000/run" \
     -H "content-type: application/json" \
-    -d "{\"prompt\":\"Plan a weather-aware outing\",\"location\":\"Seattle\",\"numbers\":[4,5]}"
-  echo
-  curl -fsS -X POST "http://${service}.demo-apps.svc.cluster.local:8000/stream" \
-    -H "content-type: application/json" \
-    -d "{\"prompt\":\"Stream a weather-aware outing\",\"location\":\"Austin\",\"numbers\":[7,8]}"
+    -d "{\"prompt\":\"What is the weather in Seattle?\",\"max_iterations\":5}"
   echo
   echo
  done

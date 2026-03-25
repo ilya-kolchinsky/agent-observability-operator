@@ -3,26 +3,32 @@ kind: Namespace
 metadata:
   name: demo-apps
 ---
+# Note: Ollama runs locally on the host machine for better performance.
+# Start it with: ollama serve
+# Pull the model with: ollama pull phi
+# The agents connect to it via host.docker.internal:11434
+---
+# MCP Server - provides weather and calculator tools
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mock-mcp-server
+  name: mcp-server
   namespace: demo-apps
   labels:
-    app.kubernetes.io/name: mock-mcp-server
+    app.kubernetes.io/name: mcp-server
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: mock-mcp-server
+      app.kubernetes.io/name: mcp-server
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: mock-mcp-server
+        app.kubernetes.io/name: mcp-server
     spec:
       containers:
         - name: app
-          image: agent-observability/mock-mcp-server:latest
+          image: agent-observability/mcp-server:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -31,49 +37,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: mock-mcp-server
+  name: mcp-server
   namespace: demo-apps
 spec:
   selector:
-    app.kubernetes.io/name: mock-mcp-server
-  ports:
-    - name: http
-      port: 8000
-      targetPort: http
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: mock-external-http-service
-  namespace: demo-apps
-  labels:
-    app.kubernetes.io/name: mock-external-http-service
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: mock-external-http-service
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: mock-external-http-service
-    spec:
-      containers:
-        - name: app
-          image: agent-observability/mock-external-http-service:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 8000
-              name: http
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: mock-external-http-service
-  namespace: demo-apps
-spec:
-  selector:
-    app.kubernetes.io/name: mock-external-http-service
+    app.kubernetes.io/name: mcp-server
   ports:
     - name: http
       port: 8000
@@ -105,9 +73,11 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: MCP_SERVER_URL
-              value: http://mock-mcp-server:8000/mcp
-            - name: EXTERNAL_HTTP_URL
-              value: http://mock-external-http-service:8000/context
+              value: http://mcp-server:8000
+            - name: OLLAMA_BASE_URL
+              value: http://host.docker.internal:11434
+            - name: OLLAMA_MODEL
+              value: phi
             - name: LOG_LEVEL
               value: INFO
           ports:
@@ -150,9 +120,11 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: MCP_SERVER_URL
-              value: http://mock-mcp-server:8000/mcp
-            - name: EXTERNAL_HTTP_URL
-              value: http://mock-external-http-service:8000/context
+              value: http://mcp-server:8000
+            - name: OLLAMA_BASE_URL
+              value: http://host.docker.internal:11434
+            - name: OLLAMA_MODEL
+              value: phi
             - name: LOG_LEVEL
               value: INFO
           ports:
@@ -195,9 +167,11 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: MCP_SERVER_URL
-              value: http://mock-mcp-server:8000/mcp
-            - name: EXTERNAL_HTTP_URL
-              value: http://mock-external-http-service:8000/context
+              value: http://mcp-server:8000
+            - name: OLLAMA_BASE_URL
+              value: http://host.docker.internal:11434
+            - name: OLLAMA_MODEL
+              value: phi
             - name: DEMO_OTLP_TRACES_ENDPOINT
               value: http://agent-observability-collector.observability.svc.cluster.local:4318/v1/traces
             - name: LOG_LEVEL
