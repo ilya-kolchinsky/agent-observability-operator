@@ -67,12 +67,16 @@ for workload in agent-no-existing agent-partial-existing agent-full-existing; do
     kubectl describe pod "${pod}" -n "${DEMO_NAMESPACE}"
 done
 
-log_step "Checking runtime coordinator instrumentation decisions"
-check_decision() {
+log_step "Checking runtime coordinator config-driven decisions"
+check_config_decision() {
   local workload=$1
   local expected_initialize_provider=$2
   local expected_instrument_fastapi=$3
-  local expected_instrument_langchain=$4
+  local expected_instrument_httpx=$4
+  local expected_instrument_requests=$5
+  local expected_instrument_langchain=$6
+  local expected_instrument_langgraph=$7
+  local expected_instrument_mcp=$8
 
   # Get diagnostics from the file
   diagnostics=$(kubectl exec -n "${DEMO_NAMESPACE}" deployment/"${workload}" -- cat /tmp/runtime-coordinator-diagnostics.log 2>/dev/null || echo "")
@@ -82,56 +86,55 @@ check_decision() {
     exit 1
   fi
 
-  # Check initialize_provider decision
-  if echo "${diagnostics}" | grep -qE "\"initialize_provider\":\\s*${expected_initialize_provider}"; then
-    echo "PASS: ${workload} initialize_provider=${expected_initialize_provider}"
-  else
-    echo "FAIL: ${workload} initialize_provider should be ${expected_initialize_provider}" >&2
-    echo "Diagnostics:" >&2
-    echo "${diagnostics}" >&2
-    exit 1
-  fi
+  # Helper function to check a specific decision
+  check_decision_value() {
+    local decision_name=$1
+    local expected_value=$2
 
-  # Check instrument_fastapi decision
-  if echo "${diagnostics}" | grep -qE "\"instrument_fastapi\":\\s*${expected_instrument_fastapi}"; then
-    echo "PASS: ${workload} instrument_fastapi=${expected_instrument_fastapi}"
-  else
-    echo "FAIL: ${workload} instrument_fastapi should be ${expected_instrument_fastapi}" >&2
-    echo "Diagnostics:" >&2
-    echo "${diagnostics}" >&2
-    exit 1
-  fi
+    if echo "${diagnostics}" | grep -qE "\"${decision_name}\":\\s*${expected_value}"; then
+      echo "PASS: ${workload} ${decision_name}=${expected_value}"
+    else
+      echo "FAIL: ${workload} ${decision_name} should be ${expected_value}" >&2
+      echo "Diagnostics:" >&2
+      echo "${diagnostics}" >&2
+      exit 1
+    fi
+  }
 
-  # Check instrument_langchain decision (as representative of agent-level instrumentation)
-  if echo "${diagnostics}" | grep -qE "\"instrument_langchain\":\\s*${expected_instrument_langchain}"; then
-    echo "PASS: ${workload} instrument_langchain=${expected_instrument_langchain}"
-  else
-    echo "FAIL: ${workload} instrument_langchain should be ${expected_instrument_langchain}" >&2
-    echo "Diagnostics:" >&2
-    echo "${diagnostics}" >&2
-    exit 1
-  fi
+  # Check all decisions
+  check_decision_value "initialize_provider" "${expected_initialize_provider}"
+  check_decision_value "instrument_fastapi" "${expected_instrument_fastapi}"
+  check_decision_value "instrument_httpx" "${expected_instrument_httpx}"
+  check_decision_value "instrument_requests" "${expected_instrument_requests}"
+  check_decision_value "instrument_langchain" "${expected_instrument_langchain}"
+  check_decision_value "instrument_langgraph" "${expected_instrument_langgraph}"
+  check_decision_value "instrument_mcp" "${expected_instrument_mcp}"
 }
 
-# Expected decisions with new fine-grained approach:
+# Expected config-driven decisions (based on sample CRs):
 #
-# IMPORTANT: The coordinator runs at sitecustomize.py time, BEFORE the application's main.py runs.
-# This means:
-# - agent-no-existing: No app-level setup → coordinator initializes everything
-# - agent-partial-existing: App code in main.py sets up provider + HTTP, but runs AFTER coordinator → coordinator makes same decisions as no-existing
-# - agent-full-existing: App code in main.py sets up everything, but runs AFTER coordinator → coordinator makes same decisions as no-existing
+# Simplified baseline: pure config-driven instrumentation (no auto-detection).
 #
-# The coordinator detects:
-# - initialize_provider=true (ProxyTracerProvider at sitecustomize time)
-# - instrument_fastapi=false (already instrumented by OTel operator's auto-instrumentation)
-# - instrument_langchain=false (not installed in demo apps)
-# - instrument_langgraph=true (available but not yet instrumented)
-# - instrument_mcp=true (available but not yet instrumented)
+# agent-no-existing (platform owns EVERYTHING):
+#   tracerProvider: platform → initialize_provider=true
+#   All instrumentation flags: true
 #
-# All three agents should have the same coordinator decisions since they all look identical at sitecustomize time.
-check_decision agent-no-existing true false false
-check_decision agent-partial-existing true false false
-check_decision agent-full-existing true false false
+# agent-partial-existing (MIXED ownership):
+#   tracerProvider: platform → initialize_provider=true
+#   fastapi: false (app handles)
+#   httpx: true, requests: true
+#   langchain: false (not used)
+#   langgraph: true (platform handles)
+#   mcp: true (platform handles - app doesn't instrument it)
+#
+# agent-full-existing (app owns EVERYTHING):
+#   tracerProvider: app → initialize_provider=false
+#   All instrumentation flags: false (app handles everything)
+
+# Format: workload initialize_provider fastapi httpx requests langchain langgraph mcp
+check_config_decision agent-no-existing true true true true true true true
+check_config_decision agent-partial-existing true false true true false true true
+check_config_decision agent-full-existing false false false false false false false
 
 log_step "Checking collector and Jaeger are reachable inside the cluster"
 require_resource "Collector deployment is available" kubectl get deployment demo-collector-collector -n "${OBS_NAMESPACE}"

@@ -43,78 +43,72 @@ spec:
               required:
                 - target
                 - instrumentation
-                - runtimeCoordinator
-                - demo
               properties:
                 target:
                   type: object
+                  required:
+                    - namespace
+                    - workloadName
+                    - workloadKind
+                    - containerName
                   properties:
                     namespace:
                       type: string
+                      description: Target workload namespace
                     workloadName:
                       type: string
+                      description: Target workload name
                     workloadKind:
                       type: string
+                      description: Target workload kind (e.g., Deployment)
+                      default: Deployment
                     containerName:
                       type: string
+                      description: Target container name within the workload
                 instrumentation:
                   type: object
+                  required:
+                    - tracerProvider
                   properties:
-                    enabled:
-                      type: boolean
-                    language:
-                      type: string
                     customPythonImage:
                       type: string
+                      description: Custom Python auto-instrumentation image
+                      default: agent-observability/custom-python-autoinstrumentation:latest
                     otelCollectorEndpoint:
                       type: string
-                    mode:
+                      description: OpenTelemetry collector endpoint
+                      default: http://agent-observability-collector.observability.svc.cluster.local:4318
+                    tracerProvider:
                       type: string
-                runtimeCoordinator:
-                  type: object
-                  properties:
-                    enabled:
+                      description: Who owns TracerProvider initialization
+                      enum:
+                        - platform
+                        - app
+                      default: platform
+                    fastapi:
                       type: boolean
-                    diagnosticsLevel:
-                      type: string
-                    heuristics:
-                      type: object
-                      properties:
-                        detectExistingProvider:
-                          type: boolean
-                        detectSpanProcessors:
-                          type: boolean
-                        detectFrameworkInstrumentation:
-                          type: boolean
-                        detectKnownVendorTracing:
-                          type: boolean
-                    patchers:
-                      type: object
-                      properties:
-                        httpClient:
-                          type: boolean
-                        grpcClient:
-                          type: boolean
-                        asgi:
-                          type: boolean
-                        wsgi:
-                          type: boolean
-                        genaiOpenAI:
-                          type: boolean
-                        mcpBoundary:
-                          type: boolean
-                    suppression:
-                      type: object
-                      properties:
-                        disableDuplicateInstrumentations:
-                          type: boolean
-                demo:
-                  type: object
-                  properties:
-                    createSampleWorkload:
+                      description: Enable FastAPI instrumentation
+                      default: true
+                    httpx:
                       type: boolean
-                    sampleAppVariant:
-                      type: string
+                      description: Enable httpx client instrumentation
+                      default: true
+                    requests:
+                      type: boolean
+                      description: Enable requests library instrumentation
+                      default: true
+                    langchain:
+                      type: boolean
+                      description: Enable LangChain instrumentation
+                      default: false
+                    langgraph:
+                      type: boolean
+                      description: Enable LangGraph instrumentation
+                      default: false
+                    mcp:
+                      type: boolean
+                      description: Enable MCP boundary instrumentation
+                      default: false
             status:
               type: object
               properties:

@@ -4,10 +4,8 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // AgentObservabilityDemoSpec defines the desired state of AgentObservabilityDemo.
 type AgentObservabilityDemoSpec struct {
-	Target             TargetSpec             `json:"target"`
-	Instrumentation    InstrumentationSpec    `json:"instrumentation"`
-	RuntimeCoordinator RuntimeCoordinatorSpec `json:"runtimeCoordinator"`
-	Demo               DemoSpec               `json:"demo"`
+	Target          TargetSpec          `json:"target"`
+	Instrumentation InstrumentationSpec `json:"instrumentation"`
 }
 
 // TargetSpec identifies the workload and container that the operator should prepare.
@@ -18,51 +16,34 @@ type TargetSpec struct {
 	ContainerName string `json:"containerName,omitempty"`
 }
 
-// InstrumentationSpec configures how demo instrumentation assets should be created.
+// InstrumentationSpec configures instrumentation behavior.
 type InstrumentationSpec struct {
-	Enabled               bool   `json:"enabled,omitempty"`
-	Language              string `json:"language,omitempty"`
-	CustomPythonImage     string `json:"customPythonImage,omitempty"`
+	// CustomPythonImage specifies the custom Python auto-instrumentation image
+	CustomPythonImage string `json:"customPythonImage,omitempty"`
+
+	// OTelCollectorEndpoint specifies the OpenTelemetry collector endpoint
 	OTelCollectorEndpoint string `json:"otelCollectorEndpoint,omitempty"`
-	Mode                  string `json:"mode,omitempty"`
-}
 
-// RuntimeCoordinatorSpec configures the runtime coordinator feature set.
-type RuntimeCoordinatorSpec struct {
-	Enabled          bool                   `json:"enabled,omitempty"`
-	DiagnosticsLevel string                 `json:"diagnosticsLevel,omitempty"`
-	Heuristics       RuntimeHeuristicsSpec  `json:"heuristics"`
-	Patchers         RuntimePatchersSpec    `json:"patchers"`
-	Suppression      RuntimeSuppressionSpec `json:"suppression"`
-}
+	// TracerProvider specifies who owns TracerProvider initialization ("platform" or "app")
+	TracerProvider string `json:"tracerProvider,omitempty"`
 
-// RuntimeHeuristicsSpec controls detection heuristics that help avoid redundant instrumentation.
-type RuntimeHeuristicsSpec struct {
-	DetectExistingProvider         bool `json:"detectExistingProvider,omitempty"`
-	DetectSpanProcessors           bool `json:"detectSpanProcessors,omitempty"`
-	DetectFrameworkInstrumentation bool `json:"detectFrameworkInstrumentation,omitempty"`
-	DetectKnownVendorTracing       bool `json:"detectKnownVendorTracing,omitempty"`
-}
+	// FastAPI enables FastAPI instrumentation
+	FastAPI bool `json:"fastapi,omitempty"`
 
-// RuntimePatchersSpec enables patchers for specific libraries and boundaries.
-type RuntimePatchersSpec struct {
-	HTTPClient  bool `json:"httpClient,omitempty"`
-	GRPCClient  bool `json:"grpcClient,omitempty"`
-	ASGI        bool `json:"asgi,omitempty"`
-	WSGI        bool `json:"wsgi,omitempty"`
-	GenAIOpenAI bool `json:"genaiOpenAI,omitempty"`
-	MCPBoundary bool `json:"mcpBoundary,omitempty"`
-}
+	// HTTPX enables httpx client instrumentation
+	HTTPX bool `json:"httpx,omitempty"`
 
-// RuntimeSuppressionSpec configures how duplicate instrumentation is suppressed.
-type RuntimeSuppressionSpec struct {
-	DisableDuplicateInstrumentations bool `json:"disableDuplicateInstrumentations,omitempty"`
-}
+	// Requests enables requests library instrumentation
+	Requests bool `json:"requests,omitempty"`
 
-// DemoSpec controls the optional demo application behavior.
-type DemoSpec struct {
-	CreateSampleWorkload bool   `json:"createSampleWorkload,omitempty"`
-	SampleAppVariant     string `json:"sampleAppVariant,omitempty"`
+	// LangChain enables LangChain instrumentation
+	LangChain bool `json:"langchain,omitempty"`
+
+	// LangGraph enables LangGraph instrumentation
+	LangGraph bool `json:"langgraph,omitempty"`
+
+	// MCP enables MCP boundary instrumentation
+	MCP bool `json:"mcp,omitempty"`
 }
 
 // AgentObservabilityDemoStatus defines the observed state of AgentObservabilityDemo.

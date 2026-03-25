@@ -1,3 +1,5 @@
+# Sample 1: NO EXISTING tracing - Platform owns EVERYTHING
+# Demo: App has zero tracing code, platform provides full observability
 apiVersion: platform.example.com/v1alpha1
 kind: AgentObservabilityDemo
 metadata:
@@ -10,32 +12,18 @@ spec:
     workloadKind: Deployment
     containerName: app
   instrumentation:
-    enabled: true
-    language: python
     customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
     otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
-    mode: sdk-and-runtime-coordinator
-  runtimeCoordinator:
-    enabled: true
-    diagnosticsLevel: basic
-    heuristics:
-      detectExistingProvider: true
-      detectSpanProcessors: true
-      detectFrameworkInstrumentation: true
-      detectKnownVendorTracing: true
-    patchers:
-      httpClient: true
-      grpcClient: true
-      asgi: true
-      wsgi: false
-      genaiOpenAI: true
-      mcpBoundary: true
-    suppression:
-      disableDuplicateInstrumentations: true
-  demo:
-    createSampleWorkload: false
-    sampleAppVariant: no-existing
+    tracerProvider: platform  # Platform initializes provider
+    fastapi: true             # Platform instruments FastAPI
+    httpx: true               # Platform instruments httpx
+    requests: true            # Platform instruments requests
+    langchain: true           # Platform instruments LangChain (if available)
+    langgraph: true           # Platform instruments LangGraph
+    mcp: true                 # Platform instruments MCP
 ---
+# Sample 2: PARTIAL EXISTING tracing - Mixed ownership
+# Demo: App handles some instrumentation, platform handles the rest
 apiVersion: platform.example.com/v1alpha1
 kind: AgentObservabilityDemo
 metadata:
@@ -48,32 +36,18 @@ spec:
     workloadKind: Deployment
     containerName: app
   instrumentation:
-    enabled: true
-    language: python
     customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
     otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
-    mode: sdk-and-runtime-coordinator
-  runtimeCoordinator:
-    enabled: true
-    diagnosticsLevel: basic
-    heuristics:
-      detectExistingProvider: true
-      detectSpanProcessors: true
-      detectFrameworkInstrumentation: true
-      detectKnownVendorTracing: true
-    patchers:
-      httpClient: true
-      grpcClient: true
-      asgi: true
-      wsgi: false
-      genaiOpenAI: true
-      mcpBoundary: true
-    suppression:
-      disableDuplicateInstrumentations: true
-  demo:
-    createSampleWorkload: false
-    sampleAppVariant: partial-existing
+    tracerProvider: platform  # Platform still owns provider
+    fastapi: false            # App instruments FastAPI in main.py
+    httpx: true               # Platform handles httpx
+    requests: true            # Platform handles requests
+    langchain: false          # Not used in demo
+    langgraph: true           # Platform handles LangGraph
+    mcp: true                 # Platform handles MCP (app doesn't instrument it)
 ---
+# Sample 3: FULL EXISTING tracing - App owns EVERYTHING
+# Demo: App has complete tracing setup, platform stays out of the way
 apiVersion: platform.example.com/v1alpha1
 kind: AgentObservabilityDemo
 metadata:
@@ -86,28 +60,12 @@ spec:
     workloadKind: Deployment
     containerName: app
   instrumentation:
-    enabled: true
-    language: python
     customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
     otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
-    mode: sdk-and-runtime-coordinator
-  runtimeCoordinator:
-    enabled: true
-    diagnosticsLevel: basic
-    heuristics:
-      detectExistingProvider: true
-      detectSpanProcessors: true
-      detectFrameworkInstrumentation: true
-      detectKnownVendorTracing: true
-    patchers:
-      httpClient: true
-      grpcClient: true
-      asgi: true
-      wsgi: false
-      genaiOpenAI: true
-      mcpBoundary: true
-    suppression:
-      disableDuplicateInstrumentations: true
-  demo:
-    createSampleWorkload: false
-    sampleAppVariant: full-existing
+    tracerProvider: app       # App initializes provider in main.py
+    fastapi: false            # App instruments everything itself
+    httpx: false
+    requests: false
+    langchain: false
+    langgraph: false
+    mcp: false

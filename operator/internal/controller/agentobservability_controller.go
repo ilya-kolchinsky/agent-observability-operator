@@ -308,24 +308,22 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 	serviceName := desiredServiceName(demo)
 	collectorEndpoint := collectorEndpointForDemo(demo)
 
+	// Default tracerProvider to "platform" if not specified
+	tracerProvider := demo.Spec.Instrumentation.TracerProvider
+	if tracerProvider == "" {
+		tracerProvider = "platform"
+	}
+
 	lines := []string{
-		"runtimeCoordinator:",
-		fmt.Sprintf("  enabled: %t", demo.Spec.RuntimeCoordinator.Enabled),
-		fmt.Sprintf("  diagnosticsLevel: %s", yamlStringValue(demo.Spec.RuntimeCoordinator.DiagnosticsLevel)),
-		"  heuristics:",
-		fmt.Sprintf("    detectExistingProvider: %t", demo.Spec.RuntimeCoordinator.Heuristics.DetectExistingProvider),
-		fmt.Sprintf("    detectSpanProcessors: %t", demo.Spec.RuntimeCoordinator.Heuristics.DetectSpanProcessors),
-		fmt.Sprintf("    detectFrameworkInstrumentation: %t", demo.Spec.RuntimeCoordinator.Heuristics.DetectFrameworkInstrumentation),
-		fmt.Sprintf("    detectKnownVendorTracing: %t", demo.Spec.RuntimeCoordinator.Heuristics.DetectKnownVendorTracing),
-		"  patchers:",
-		fmt.Sprintf("    httpClient: %t", demo.Spec.RuntimeCoordinator.Patchers.HTTPClient),
-		fmt.Sprintf("    grpcClient: %t", demo.Spec.RuntimeCoordinator.Patchers.GRPCClient),
-		fmt.Sprintf("    asgi: %t", demo.Spec.RuntimeCoordinator.Patchers.ASGI),
-		fmt.Sprintf("    wsgi: %t", demo.Spec.RuntimeCoordinator.Patchers.WSGI),
-		fmt.Sprintf("    genaiOpenAI: %t", demo.Spec.RuntimeCoordinator.Patchers.GenAIOpenAI),
-		fmt.Sprintf("    mcpBoundary: %t", demo.Spec.RuntimeCoordinator.Patchers.MCPBoundary),
-		"  suppression:",
-		fmt.Sprintf("    disableDuplicateInstrumentations: %t", demo.Spec.RuntimeCoordinator.Suppression.DisableDuplicateInstrumentations),
+		"# Simplified config-based instrumentation",
+		"instrumentation:",
+		fmt.Sprintf("  tracerProvider: %s", yamlStringValue(tracerProvider)),
+		fmt.Sprintf("  fastapi: %t", demo.Spec.Instrumentation.FastAPI),
+		fmt.Sprintf("  httpx: %t", demo.Spec.Instrumentation.HTTPX),
+		fmt.Sprintf("  requests: %t", demo.Spec.Instrumentation.Requests),
+		fmt.Sprintf("  langchain: %t", demo.Spec.Instrumentation.LangChain),
+		fmt.Sprintf("  langgraph: %t", demo.Spec.Instrumentation.LangGraph),
+		fmt.Sprintf("  mcp: %t", demo.Spec.Instrumentation.MCP),
 		"telemetry:",
 		fmt.Sprintf("  exporterEndpoint: %s", yamlStringValue(collectorEndpoint)),
 		fmt.Sprintf("  tracesEndpoint: %s", yamlStringValue(collectorTracesEndpointForDemo(demo))),

@@ -20,12 +20,18 @@ def initialize_tracer_provider(config: dict[str, Any]) -> None:
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+        # Get telemetry config (supports both old and new structure)
+        telemetry = config.get("telemetry", {})
+        service_name = telemetry.get("service_name") or config.get("service_name", "unknown-service")
+        service_namespace = telemetry.get("service_namespace") or config.get("service_namespace", "default")
+        deployment_name = telemetry.get("deployment_name") or config.get("deployment_name")
+        traces_endpoint = telemetry.get("traces_endpoint") or config.get("traces_endpoint") or telemetry.get("exporter_endpoint") or config.get("exporter_endpoint")
+
         # Build resource attributes
         resource_attrs = {
-            "service.name": config.get("service_name", "unknown-service"),
-            "service.namespace": config.get("service_namespace", "default"),
+            "service.name": service_name,
+            "service.namespace": service_namespace,
         }
-        deployment_name = config.get("deployment_name")
         if deployment_name:
             resource_attrs["k8s.deployment.name"] = deployment_name
 
@@ -35,18 +41,19 @@ def initialize_tracer_provider(config: dict[str, Any]) -> None:
         provider = TracerProvider(resource=resource)
 
         # Add OTLP exporter
-        traces_endpoint = config.get("traces_endpoint") or config.get("exporter_endpoint")
         if traces_endpoint:
             exporter = OTLPSpanExporter(endpoint=traces_endpoint)
             processor = BatchSpanProcessor(exporter)
             provider.add_span_processor(processor)
+            LOGGER.info(f"Initialized TracerProvider with OTLP exporter at {traces_endpoint}")
+        else:
+            LOGGER.warning("No traces endpoint configured - TracerProvider initialized without exporter")
 
         # Set as global
         trace.set_tracer_provider(provider)
-        LOGGER.info("Initialized TracerProvider with OTLP exporter", extra={"endpoint": traces_endpoint})
 
     except Exception as exc:
-        LOGGER.warning("Failed to initialize TracerProvider", extra={"error": str(exc)})
+        LOGGER.warning(f"Failed to initialize TracerProvider: {exc}")
 
 
 def instrument_fastapi() -> bool:
