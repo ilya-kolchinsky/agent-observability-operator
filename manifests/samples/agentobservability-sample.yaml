@@ -23,7 +23,7 @@ spec:
     mcp: true                 # Platform instruments MCP
 ---
 # Sample 2: PARTIAL EXISTING tracing - Mixed ownership
-# Demo: App handles some instrumentation, platform handles the rest
+# Demo: App initializes TracerProvider and handles some instrumentation, platform handles the rest
 apiVersion: platform.example.com/v1alpha1
 kind: AgentObservabilityDemo
 metadata:

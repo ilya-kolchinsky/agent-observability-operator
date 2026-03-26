@@ -1,14 +1,36 @@
 """Demo agent with partial tracing ownership.
 
 Simplified baseline version:
-- Platform owns TracerProvider (don't initialize here)
+- App owns TracerProvider initialization (initialize here)
 - App owns FastAPI and LangChain instrumentation (instrument here)
 - Platform owns httpx, requests, and MCP (don't instrument here)
 """
 
+import os
+
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from common.agent_app import build_scenario_config, create_agent_app
+
+# App initializes TracerProvider (config: tracerProvider: app)
+resource = Resource.create({
+    "service.name": "agent-partial-existing",
+    "service.namespace": "demo-apps",
+    "app.setup": "partial",
+})
+
+provider = TracerProvider(resource=resource)
+endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://localhost:4318/v1/traces")
+exporter = OTLPSpanExporter(endpoint=endpoint)
+processor = BatchSpanProcessor(exporter)
+provider.add_span_processor(processor)
+trace.set_tracer_provider(provider)
+print("[agent-partial-existing] App initialized TracerProvider", flush=True)
 
 # App explicitly instruments FastAPI (config: fastapi: false)
 try:

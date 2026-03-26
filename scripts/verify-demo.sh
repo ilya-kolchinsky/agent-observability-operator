@@ -118,7 +118,7 @@ check_config_decision() {
 #   All instrumentation flags: true
 #
 # agent-partial-existing (MIXED ownership):
-#   tracerProvider: platform → initialize_provider=true
+#   tracerProvider: app → initialize_provider=false (app initializes in main.py)
 #   fastapi: false (app handles)
 #   httpx: true, requests: true
 #   langchain: false (app handles)
@@ -130,7 +130,7 @@ check_config_decision() {
 
 # Format: workload initialize_provider fastapi httpx requests langchain mcp
 check_config_decision agent-no-existing true true true true true true
-check_config_decision agent-partial-existing true false true true false true
+check_config_decision agent-partial-existing false false true true false true
 check_config_decision agent-full-existing false false false false false false
 
 log_step "Checking collector and Jaeger are reachable inside the cluster"
