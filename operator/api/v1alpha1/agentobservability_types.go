@@ -24,23 +24,33 @@ type InstrumentationSpec struct {
 	// OTelCollectorEndpoint specifies the OpenTelemetry collector endpoint
 	OTelCollectorEndpoint string `json:"otelCollectorEndpoint,omitempty"`
 
-	// TracerProvider specifies who owns TracerProvider initialization ("platform" or "app")
-	TracerProvider string `json:"tracerProvider,omitempty"`
+	// EnableInstrumentation controls whether auto-instrumentation is enabled.
+	// If true, auto-instrumentation is enabled with library defaults.
+	// If false, auto-instrumentation is disabled regardless of other settings.
+	// If omitted and other instrumentation fields are specified, defaults to true.
+	// If omitted and no other instrumentation fields are specified, defaults to false.
+	EnableInstrumentation *bool `json:"enableInstrumentation,omitempty"`
 
-	// FastAPI enables FastAPI instrumentation
-	FastAPI bool `json:"fastapi,omitempty"`
+	// TracerProvider specifies who owns TracerProvider initialization ("platform" or "app").
+	// If omitted, inferred from library field values:
+	// - All library fields true (or default) → "platform"
+	// - At least one library field false → "app"
+	TracerProvider *string `json:"tracerProvider,omitempty"`
 
-	// HTTPX enables httpx client instrumentation
-	HTTPX bool `json:"httpx,omitempty"`
+	// FastAPI enables FastAPI instrumentation. Defaults to true if enableInstrumentation is true.
+	FastAPI *bool `json:"fastapi,omitempty"`
 
-	// Requests enables requests library instrumentation
-	Requests bool `json:"requests,omitempty"`
+	// HTTPX enables httpx client instrumentation. Defaults to true if enableInstrumentation is true.
+	HTTPX *bool `json:"httpx,omitempty"`
 
-	// LangChain enables LangChain instrumentation
-	LangChain bool `json:"langchain,omitempty"`
+	// Requests enables requests library instrumentation. Defaults to true if enableInstrumentation is true.
+	Requests *bool `json:"requests,omitempty"`
 
-	// MCP enables MCP boundary instrumentation
-	MCP bool `json:"mcp,omitempty"`
+	// LangChain enables LangChain instrumentation. Defaults to true if enableInstrumentation is true.
+	LangChain *bool `json:"langchain,omitempty"`
+
+	// MCP enables MCP boundary instrumentation. Defaults to true if enableInstrumentation is true.
+	MCP *bool `json:"mcp,omitempty"`
 }
 
 // AgentObservabilityDemoStatus defines the observed state of AgentObservabilityDemo.

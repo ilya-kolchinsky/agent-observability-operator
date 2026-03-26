@@ -42,7 +42,6 @@ spec:
               type: object
               required:
                 - target
-                - instrumentation
               properties:
                 target:
                   type: object
@@ -67,44 +66,46 @@ spec:
                       description: Target container name within the workload
                 instrumentation:
                   type: object
-                  required:
-                    - tracerProvider
                   properties:
                     customPythonImage:
                       type: string
                       description: Custom Python auto-instrumentation image
-                      default: agent-observability/custom-python-autoinstrumentation:latest
                     otelCollectorEndpoint:
                       type: string
                       description: OpenTelemetry collector endpoint
-                      default: http://agent-observability-collector.observability.svc.cluster.local:4318
+                    enableInstrumentation:
+                      type: boolean
+                      description: |
+                        Controls whether auto-instrumentation is enabled.
+                        If true, auto-instrumentation is enabled with library defaults.
+                        If false, auto-instrumentation is disabled regardless of other settings.
+                        If omitted and other instrumentation fields are specified, defaults to true.
+                        If omitted and no other instrumentation fields are specified, defaults to false.
                     tracerProvider:
                       type: string
-                      description: Who owns TracerProvider initialization
+                      description: |
+                        Who owns TracerProvider initialization (platform or app).
+                        If omitted, inferred from library field values:
+                        - All library fields true (or default) means platform
+                        - At least one library field false means app
                       enum:
                         - platform
                         - app
-                      default: platform
                     fastapi:
                       type: boolean
-                      description: Enable FastAPI instrumentation
-                      default: true
+                      description: Enable FastAPI instrumentation (defaults to true when enableInstrumentation is true)
                     httpx:
                       type: boolean
-                      description: Enable httpx client instrumentation
-                      default: true
+                      description: Enable httpx client instrumentation (defaults to true when enableInstrumentation is true)
                     requests:
                       type: boolean
-                      description: Enable requests library instrumentation
-                      default: true
+                      description: Enable requests library instrumentation (defaults to true when enableInstrumentation is true)
                     langchain:
                       type: boolean
-                      description: Enable LangChain instrumentation
-                      default: false
+                      description: Enable LangChain instrumentation (defaults to true when enableInstrumentation is true)
                     mcp:
                       type: boolean
-                      description: Enable MCP boundary instrumentation
-                      default: false
+                      description: Enable MCP boundary instrumentation (defaults to true when enableInstrumentation is true)
             status:
               type: object
               properties:

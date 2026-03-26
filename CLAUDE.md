@@ -175,21 +175,94 @@ All three demo agents share the same workload (FastAPI + LangGraph + MCP + httpx
 
 ### Custom resource spec fields
 
-- `spec.target.{namespace,workloadName,workloadKind,containerName}` - target for instrumentation
-- `spec.instrumentation.customPythonImage` - custom auto-instrumentation image reference
-- `spec.instrumentation.otelCollectorEndpoint` - OTLP endpoint for traces
-- `spec.runtimeCoordinator.enabled` - enable/disable runtime coordinator
-- `spec.runtimeCoordinator.diagnosticsLevel` - verbosity of startup diagnostics
-- `spec.runtimeCoordinator.heuristics.*` - detection heuristic toggles
-- `spec.runtimeCoordinator.patchers.*` - instrumentation target toggles
+**Target specification:**
+- `spec.target.namespace` - target workload namespace (optional, defaults to CR namespace)
+- `spec.target.workloadName` - target workload name (required)
+- `spec.target.workloadKind` - target workload kind (optional, defaults to "Deployment")
+- `spec.target.containerName` - target container name within the workload (required)
 
-### Environment variables used by runtime coordinator
+**Instrumentation configuration:**
+- `spec.instrumentation.customPythonImage` - custom auto-instrumentation image reference (optional, defaults to `agent-observability/custom-python-autoinstrumentation:latest`)
+- `spec.instrumentation.otelCollectorEndpoint` - OTLP endpoint for traces (optional, defaults to `http://agent-observability-collector.observability.svc.cluster.local:4318`)
 
-- `AGENT_OBS_MODE` - explicit mode override
-- `AGENT_OBS_CONFIG_FILE` - path to mounted coordinator config
-- `AGENT_OBS_DIAGNOSTICS_LEVEL` - diagnostics verbosity
-- `AGENT_OBS_ENABLED_HEURISTICS` - comma-separated list of enabled heuristics
-- `AGENT_OBS_ENABLED_PATCHERS` - comma-separated list of enabled patchers
+**Smart defaults with inference:**
+
+- `spec.instrumentation.enableInstrumentation` (optional)
+  - `true` - enable auto-instrumentation with library defaults
+  - `false` - disable all auto-instrumentation (safety override)
+  - **If omitted and other instrumentation fields are specified → defaults to `true`** (implicit opt-in)
+  - **If omitted and no instrumentation fields specified → defaults to `false`** (safe for production)
+
+- `spec.instrumentation.tracerProvider` (optional)
+  - `platform` - coordinator initializes TracerProvider
+  - `app` - app owns TracerProvider initialization
+  - **If omitted, inferred from library field values:**
+    - All library fields `true` (or default) → `platform`
+    - At least one library field `false` → `app`
+
+- `spec.instrumentation.{fastapi,httpx,requests,langchain,mcp}` (optional boolean)
+  - `true` - platform instruments this library
+  - `false` - app instruments this library (opt-out)
+  - **If omitted and `enableInstrumentation` is true → defaults to `true`**
+  - **If omitted and `enableInstrumentation` is false → defaults to `false`**
+
+**Validation:**
+
+The operator validates for contradictory configuration and will reject the CR with an error if:
+- `enableInstrumentation: false` AND any library field is explicitly set to `true`
+
+This prevents ambiguous configurations. If you want to disable auto-instrumentation, all explicit library fields must be `false` (or omitted).
+
+### Configuration patterns
+
+**Pattern 1: Full auto-instrumentation (demo/development)**
+```yaml
+spec:
+  instrumentation:
+    enableInstrumentation: true
+# All libs → true, tracerProvider → platform
+```
+
+**Pattern 2: Selective opt-out (partial existing instrumentation)**
+```yaml
+spec:
+  instrumentation:
+    fastapi: false      # App instruments FastAPI
+    langchain: false    # App instruments LangChain
+# enableInstrumentation → true (implicit)
+# Other libs → true, tracerProvider → app (inferred)
+```
+
+**Pattern 3: Minimal instrumentation (full existing setup)**
+```yaml
+spec:
+  instrumentation:
+    fastapi: false
+    httpx: false
+    requests: false
+    langchain: false
+    mcp: false
+# enableInstrumentation → true (implicit)
+# tracerProvider → app (inferred)
+```
+
+**Pattern 4: Production safe default (no config)**
+```yaml
+spec:
+  instrumentation: {}
+# enableInstrumentation → false (safe default)
+# No instrumentation applied
+```
+
+**Pattern 5: Explicit control (override inference)**
+```yaml
+spec:
+  instrumentation:
+    enableInstrumentation: true
+    tracerProvider: app      # Override inference
+    langchain: false
+    fastapi: true
+```
 
 ## Important Constraints
 

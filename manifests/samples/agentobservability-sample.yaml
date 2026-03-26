@@ -14,6 +14,7 @@ spec:
   instrumentation:
     customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
     otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
+    enableInstrumentation: true
     tracerProvider: platform  # Platform initializes provider
     fastapi: true             # Platform instruments FastAPI
     httpx: true               # Platform instruments httpx
@@ -37,7 +38,8 @@ spec:
   instrumentation:
     customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
     otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
-    tracerProvider: platform  # Platform still owns provider
+    enableInstrumentation: true
+    tracerProvider: app       # App owns provider (inferred from fastapi: false)
     fastapi: false            # App instruments FastAPI in main.py
     httpx: true               # Platform handles httpx
     requests: true            # Platform handles requests
@@ -60,8 +62,9 @@ spec:
   instrumentation:
     customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
     otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
-    tracerProvider: app       # App initializes provider in main.py
-    fastapi: false            # App instruments everything itself
+    enableInstrumentation: false  # Platform should NOT auto-instrument
+    tracerProvider: app           # App initializes provider in main.py
+    fastapi: false                # App instruments everything itself
     httpx: false
     requests: false
     langchain: false

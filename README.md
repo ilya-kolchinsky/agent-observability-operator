@@ -99,7 +99,123 @@ A more detailed view:
 - `manifests/jaeger/` - Jaeger all-in-one deployment and services
 - `manifests/demo/` - demo app Deployments and Services
 - `manifests/samples/` - sample `AgentObservabilityDemo` CRs for the three scenarios
-- `demo-apps/common/` - shared LangGraph workflow, MCP client, logging, and tracing helpers
+- `demo-apps/common/` - shared agent implementation, MCP client, logging, and tracing helpers
+
+## Configuration
+
+The `AgentObservabilityDemo` custom resource provides flexible configuration with smart defaults and inference logic.
+
+### Key features
+
+**Smart enableInstrumentation inference:**
+- If `enableInstrumentation` is explicitly set, that value is used
+- If `enableInstrumentation` is omitted but other instrumentation fields are specified → defaults to `true` (implicit opt-in)
+- If `enableInstrumentation` is omitted and no instrumentation fields are specified → defaults to `false` (production-safe default)
+- If `enableInstrumentation` is `false`, all auto-instrumentation is disabled regardless of other settings
+
+**Automatic tracerProvider inference:**
+- If all library fields are `true` (or default) → infers `tracerProvider: platform` (coordinator initializes TracerProvider)
+- If at least one library field is `false` → infers `tracerProvider: app` (app owns TracerProvider)
+- Can be explicitly overridden if needed
+
+**Library field defaults:**
+- When `enableInstrumentation` is `true`, all library fields (`fastapi`, `httpx`, `requests`, `langchain`, `mcp`) default to `true`
+- Explicitly set any to `false` to opt out of platform instrumentation for that library
+
+**Configuration validation:**
+- The operator validates configuration for contradictions and will reject the CR with an error if `enableInstrumentation: false` is combined with any library field explicitly set to `true`
+- This prevents ambiguous configurations where the intent is unclear
+
+### Configuration examples
+
+**Example 1: Full auto-instrumentation (minimal config)**
+```yaml
+apiVersion: platform.example.com/v1alpha1
+kind: AgentObservabilityDemo
+metadata:
+  name: my-agent
+spec:
+  target:
+    namespace: my-namespace
+    workloadName: my-deployment
+    containerName: app
+  instrumentation:
+    enableInstrumentation: true
+    # All libraries default to true
+    # tracerProvider inferred as "platform"
+```
+
+**Example 2: Selective opt-out (app owns some instrumentation)**
+```yaml
+apiVersion: platform.example.com/v1alpha1
+kind: AgentObservabilityDemo
+metadata:
+  name: my-agent
+spec:
+  target:
+    namespace: my-namespace
+    workloadName: my-deployment
+    containerName: app
+  instrumentation:
+    fastapi: false      # App instruments FastAPI
+    langchain: false    # App instruments LangChain
+    # enableInstrumentation inferred as true (fields specified)
+    # Other libs (httpx, requests, mcp) default to true
+    # tracerProvider inferred as "app" (some libs false)
+```
+
+**Example 3: Production safe default (no instrumentation)**
+```yaml
+apiVersion: platform.example.com/v1alpha1
+kind: AgentObservabilityDemo
+metadata:
+  name: my-agent
+spec:
+  target:
+    namespace: my-namespace
+    workloadName: my-deployment
+    containerName: app
+  instrumentation: {}
+  # enableInstrumentation inferred as false (safe default)
+  # No auto-instrumentation applied
+```
+
+**Example 4: Explicit override**
+```yaml
+apiVersion: platform.example.com/v1alpha1
+kind: AgentObservabilityDemo
+metadata:
+  name: my-agent
+spec:
+  target:
+    namespace: my-namespace
+    workloadName: my-deployment
+    containerName: app
+  instrumentation:
+    enableInstrumentation: true
+    tracerProvider: app      # Override inference
+    langchain: false
+    fastapi: true
+```
+
+### Complete field reference
+
+**Target specification:**
+- `spec.target.namespace` - Target workload namespace (optional, defaults to CR namespace)
+- `spec.target.workloadName` - Target workload name (required)
+- `spec.target.workloadKind` - Target workload kind (optional, defaults to "Deployment")
+- `spec.target.containerName` - Target container name (required)
+
+**Instrumentation configuration:**
+- `spec.instrumentation.customPythonImage` - Custom auto-instrumentation image (optional, defaults to `agent-observability/custom-python-autoinstrumentation:latest`)
+- `spec.instrumentation.otelCollectorEndpoint` - OTLP collector endpoint (optional, defaults to `http://agent-observability-collector.observability.svc.cluster.local:4318`)
+- `spec.instrumentation.enableInstrumentation` - Enable/disable auto-instrumentation (optional, inferred as described above)
+- `spec.instrumentation.tracerProvider` - Who owns TracerProvider initialization: `platform` or `app` (optional, inferred from library fields)
+- `spec.instrumentation.fastapi` - Enable FastAPI instrumentation (optional, defaults to true when enabled)
+- `spec.instrumentation.httpx` - Enable httpx instrumentation (optional, defaults to true when enabled)
+- `spec.instrumentation.requests` - Enable requests instrumentation (optional, defaults to true when enabled)
+- `spec.instrumentation.langchain` - Enable LangChain instrumentation (optional, defaults to true when enabled)
+- `spec.instrumentation.mcp` - Enable MCP instrumentation (optional, defaults to true when enabled)
 
 ## Build and run instructions
 

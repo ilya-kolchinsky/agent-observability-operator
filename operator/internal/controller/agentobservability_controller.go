@@ -65,6 +65,14 @@ func (r *AgentObservabilityDemoReconciler) Reconcile(ctx context.Context, req ct
 		return ctrl.Result{}, fmt.Errorf("unsupported target workload kind %q: only Deployment is supported for this PoC", demo.Spec.Target.WorkloadKind)
 	}
 
+	// Validate instrumentation spec for contradictions
+	if err := validateInstrumentationSpec(&demo.Spec.Instrumentation); err != nil {
+		return ctrl.Result{}, fmt.Errorf("invalid instrumentation configuration: %w", err)
+	}
+
+	// Apply defaults and inference to instrumentation spec
+	resolvedInstrumentation := resolveInstrumentationSpec(&demo.Spec.Instrumentation)
+
 	collectorEndpoint := collectorEndpointForDemo(&demo)
 	logger.Info(
 		"reconciling AgentObservabilityDemo for end-to-end telemetry path",
@@ -72,14 +80,15 @@ func (r *AgentObservabilityDemoReconciler) Reconcile(ctx context.Context, req ct
 		"targetWorkload", demo.Spec.Target.WorkloadName,
 		"targetContainer", demo.Spec.Target.ContainerName,
 		"collectorEndpoint", collectorEndpoint,
+		"enableInstrumentation", boolPtrValue(resolvedInstrumentation.EnableInstrumentation),
 	)
 
-	desiredInstrumentation := buildDesiredInstrumentation(&demo, targetNamespace)
+	desiredInstrumentation := buildDesiredInstrumentation(&demo, targetNamespace, resolvedInstrumentation)
 	if err := r.reconcileInstrumentation(ctx, logger, desiredInstrumentation); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	desiredConfigMap := buildDesiredRuntimeCoordinatorConfigMap(&demo, targetNamespace)
+	desiredConfigMap := buildDesiredRuntimeCoordinatorConfigMap(&demo, targetNamespace, resolvedInstrumentation)
 	if err := r.reconcileConfigMap(ctx, logger, desiredConfigMap); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -260,7 +269,12 @@ func (r *AgentObservabilityDemoReconciler) reconcileConfigMap(ctx context.Contex
 	return nil
 }
 
-func buildDesiredInstrumentation(demo *platformv1alpha1.AgentObservabilityDemo, namespace string) *otelv1alpha1.Instrumentation {
+func buildDesiredInstrumentation(demo *platformv1alpha1.AgentObservabilityDemo, namespace string, resolvedSpec *platformv1alpha1.InstrumentationSpec) *otelv1alpha1.Instrumentation {
+	customImage := resolvedSpec.CustomPythonImage
+	if customImage == "" {
+		customImage = "agent-observability/custom-python-autoinstrumentation:latest"
+	}
+
 	return &otelv1alpha1.Instrumentation{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Instrumentation",
@@ -279,13 +293,13 @@ func buildDesiredInstrumentation(demo *platformv1alpha1.AgentObservabilityDemo, 
 				Endpoint: collectorEndpointForDemo(demo),
 			},
 			Python: otelv1alpha1.Python{
-				Image: demo.Spec.Instrumentation.CustomPythonImage,
+				Image: customImage,
 			},
 		},
 	}
 }
 
-func buildDesiredRuntimeCoordinatorConfigMap(demo *platformv1alpha1.AgentObservabilityDemo, namespace string) *corev1.ConfigMap {
+func buildDesiredRuntimeCoordinatorConfigMap(demo *platformv1alpha1.AgentObservabilityDemo, namespace string, resolvedSpec *platformv1alpha1.InstrumentationSpec) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "ConfigMap",
@@ -299,30 +313,24 @@ func buildDesiredRuntimeCoordinatorConfigMap(demo *platformv1alpha1.AgentObserva
 			},
 		},
 		Data: map[string]string{
-			runtimeCoordinatorConfigMapKey: renderRuntimeCoordinatorConfig(demo, namespace),
+			runtimeCoordinatorConfigMapKey: renderRuntimeCoordinatorConfig(demo, namespace, resolvedSpec),
 		},
 	}
 }
 
-func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDemo, namespace string) string {
+func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDemo, namespace string, resolvedSpec *platformv1alpha1.InstrumentationSpec) string {
 	serviceName := desiredServiceName(demo)
 	collectorEndpoint := collectorEndpointForDemo(demo)
-
-	// Default tracerProvider to "platform" if not specified
-	tracerProvider := demo.Spec.Instrumentation.TracerProvider
-	if tracerProvider == "" {
-		tracerProvider = "platform"
-	}
 
 	lines := []string{
 		"# Simplified config-based instrumentation",
 		"instrumentation:",
-		fmt.Sprintf("  tracerProvider: %s", yamlStringValue(tracerProvider)),
-		fmt.Sprintf("  fastapi: %t", demo.Spec.Instrumentation.FastAPI),
-		fmt.Sprintf("  httpx: %t", demo.Spec.Instrumentation.HTTPX),
-		fmt.Sprintf("  requests: %t", demo.Spec.Instrumentation.Requests),
-		fmt.Sprintf("  langchain: %t", demo.Spec.Instrumentation.LangChain),
-		fmt.Sprintf("  mcp: %t", demo.Spec.Instrumentation.MCP),
+		fmt.Sprintf("  tracerProvider: %s", yamlStringValue(stringPtrValue(resolvedSpec.TracerProvider))),
+		fmt.Sprintf("  fastapi: %t", boolPtrValue(resolvedSpec.FastAPI)),
+		fmt.Sprintf("  httpx: %t", boolPtrValue(resolvedSpec.HTTPX)),
+		fmt.Sprintf("  requests: %t", boolPtrValue(resolvedSpec.Requests)),
+		fmt.Sprintf("  langchain: %t", boolPtrValue(resolvedSpec.LangChain)),
+		fmt.Sprintf("  mcp: %t", boolPtrValue(resolvedSpec.MCP)),
 		"telemetry:",
 		fmt.Sprintf("  exporterEndpoint: %s", yamlStringValue(collectorEndpoint)),
 		fmt.Sprintf("  tracesEndpoint: %s", yamlStringValue(collectorTracesEndpointForDemo(demo))),
@@ -514,6 +522,136 @@ func collectorTracesEndpointForDemo(demo *platformv1alpha1.AgentObservabilityDem
 		return endpoint
 	}
 	return strings.TrimRight(endpoint, "/") + path.Clean("/v1/traces")
+}
+
+// validateInstrumentationSpec checks for contradictory configuration.
+func validateInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) error {
+	// Check for contradiction: enableInstrumentation: false with any library: true
+	if spec.EnableInstrumentation != nil && !*spec.EnableInstrumentation {
+		var conflictingFields []string
+
+		if spec.FastAPI != nil && *spec.FastAPI {
+			conflictingFields = append(conflictingFields, "fastapi: true")
+		}
+		if spec.HTTPX != nil && *spec.HTTPX {
+			conflictingFields = append(conflictingFields, "httpx: true")
+		}
+		if spec.Requests != nil && *spec.Requests {
+			conflictingFields = append(conflictingFields, "requests: true")
+		}
+		if spec.LangChain != nil && *spec.LangChain {
+			conflictingFields = append(conflictingFields, "langchain: true")
+		}
+		if spec.MCP != nil && *spec.MCP {
+			conflictingFields = append(conflictingFields, "mcp: true")
+		}
+
+		if len(conflictingFields) > 0 {
+			return fmt.Errorf(
+				"enableInstrumentation is false but the following library fields are true: %s. "+
+				"Either set enableInstrumentation to true or set these library fields to false",
+				strings.Join(conflictingFields, ", "),
+			)
+		}
+	}
+
+	return nil
+}
+
+// resolveInstrumentationSpec applies defaults and inference logic to the instrumentation spec.
+func resolveInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) *platformv1alpha1.InstrumentationSpec {
+	resolved := &platformv1alpha1.InstrumentationSpec{
+		CustomPythonImage:     spec.CustomPythonImage,
+		OTelCollectorEndpoint: spec.OTelCollectorEndpoint,
+	}
+
+	// Infer enableInstrumentation if not specified
+	enableInstrumentation := inferEnableInstrumentation(spec)
+	resolved.EnableInstrumentation = &enableInstrumentation
+
+	// Determine default value for library fields based on enableInstrumentation
+	defaultLibValue := enableInstrumentation
+
+	// Apply library field values (use explicit if set, otherwise use default)
+	resolved.FastAPI = boolPtrOrDefault(spec.FastAPI, defaultLibValue)
+	resolved.HTTPX = boolPtrOrDefault(spec.HTTPX, defaultLibValue)
+	resolved.Requests = boolPtrOrDefault(spec.Requests, defaultLibValue)
+	resolved.LangChain = boolPtrOrDefault(spec.LangChain, defaultLibValue)
+	resolved.MCP = boolPtrOrDefault(spec.MCP, defaultLibValue)
+
+	// Infer tracerProvider if not specified (respects explicit value)
+	if spec.TracerProvider != nil {
+		resolved.TracerProvider = spec.TracerProvider
+	} else {
+		inferred := inferTracerProvider(resolved)
+		resolved.TracerProvider = &inferred
+	}
+
+	return resolved
+}
+
+// inferEnableInstrumentation determines if instrumentation should be enabled.
+// Logic:
+// - If explicitly set, use that value
+// - If not set but other instrumentation fields are specified, default to true
+// - If not set and no other fields specified, default to false (safe for production)
+func inferEnableInstrumentation(spec *platformv1alpha1.InstrumentationSpec) bool {
+	if spec.EnableInstrumentation != nil {
+		return *spec.EnableInstrumentation
+	}
+
+	// Check if any instrumentation settings are specified
+	hasSettings := spec.TracerProvider != nil ||
+		spec.FastAPI != nil ||
+		spec.HTTPX != nil ||
+		spec.Requests != nil ||
+		spec.LangChain != nil ||
+		spec.MCP != nil
+
+	// If settings are specified, implicit opt-in
+	return hasSettings
+}
+
+// inferTracerProvider determines who owns TracerProvider initialization.
+// Logic:
+// - All library fields true (or default) → "platform" (we create it)
+// - At least one library field false → "app" (they already have it)
+func inferTracerProvider(spec *platformv1alpha1.InstrumentationSpec) string {
+	// If any library is explicitly disabled, the app must have existing instrumentation
+	if (spec.FastAPI != nil && !*spec.FastAPI) ||
+		(spec.HTTPX != nil && !*spec.HTTPX) ||
+		(spec.Requests != nil && !*spec.Requests) ||
+		(spec.LangChain != nil && !*spec.LangChain) ||
+		(spec.MCP != nil && !*spec.MCP) {
+		return "app"
+	}
+
+	// All libraries enabled (or default), we provide the TracerProvider
+	return "platform"
+}
+
+// boolPtrOrDefault returns the value if not nil, otherwise returns the default.
+func boolPtrOrDefault(ptr *bool, defaultVal bool) *bool {
+	if ptr != nil {
+		return ptr
+	}
+	return &defaultVal
+}
+
+// boolPtrValue returns the value of a bool pointer, or false if nil.
+func boolPtrValue(ptr *bool) bool {
+	if ptr != nil {
+		return *ptr
+	}
+	return false
+}
+
+// stringPtrValue returns the value of a string pointer, or empty string if nil.
+func stringPtrValue(ptr *string) string {
+	if ptr != nil {
+		return *ptr
+	}
+	return ""
 }
 
 // SetupWithManager wires the controller into the manager.
