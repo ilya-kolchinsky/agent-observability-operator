@@ -69,3 +69,27 @@ spec:
     requests: false
     langchain: false
     mcp: false
+---
+# Sample 4: AUTO-DETECTION - Runtime ownership resolution for httpx
+# Demo: App instruments httpx, platform auto-detects and grants ownership
+apiVersion: platform.example.com/v1alpha1
+kind: AgentObservabilityDemo
+metadata:
+  name: auto-httpx
+  namespace: demo-apps
+spec:
+  target:
+    namespace: demo-apps
+    workloadName: agent-auto-httpx
+    workloadKind: Deployment
+    containerName: app
+  instrumentation:
+    customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
+    otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
+    enableInstrumentation: true
+    tracerProvider: app           # App owns provider (inferred from fastapi: false)
+    fastapi: false                # App instruments FastAPI in main.py
+    httpx: auto                   # AUTO-DETECTION: App instruments, wrapper observes claim
+    requests: true                # Platform handles requests
+    langchain: false              # App instruments LangChain in main.py
+    mcp: true                     # Platform handles MCP

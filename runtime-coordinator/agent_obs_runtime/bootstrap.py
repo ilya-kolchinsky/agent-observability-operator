@@ -1,4 +1,4 @@
-"""Bootstrap module - simplified config-based instrumentation."""
+"""Bootstrap module - simplified config-based instrumentation with ownership resolution."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from .instrumentation import (
     instrument_langchain,
     instrument_mcp,
 )
+from .ownership import initialize_resolver, get_resolver
+from .ownership_wrappers import install_ownership_wrappers, set_coordinator_context
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,25 +25,42 @@ def bootstrap(config: dict[str, Any] | None = None) -> None:
     """
     Main entry point for runtime coordinator.
 
-    Simplified baseline: pure config-driven instrumentation.
-    No auto-detection, no heuristics - just read config and instrument accordingly.
+    Config-driven instrumentation with ownership resolution support.
+    Supports:
+    - true: Platform instruments (explicit)
+    - false: App instruments (explicit)
+    - "auto": Runtime ownership resolution via wrappers
     """
     if config is None:
         config = _load_config()
 
+    # Step 1: Initialize ownership resolver with config
+    resolver = initialize_resolver(config)
+    LOGGER.info("Ownership resolver initialized")
+
+    # Step 2: Install ownership wrappers ONLY for libraries configured with "auto"
+    # This allows observing app claims during startup
+    # Backwards compatibility: No wrappers installed if no "auto" configs
+    install_ownership_wrappers(config)
+
     instrumentation_config = config.get("instrumentation", {})
     tracer_provider = instrumentation_config.get("tracerProvider", "platform")
 
-    # Emit diagnostics showing config-driven decisions
+    # Emit diagnostics showing platform instrumentation decisions
+    # Note: "auto" config means ownership is deferred to runtime wrappers (no bootstrap instrumentation)
     _emit_diagnostics("config_loaded", {
         "config": instrumentation_config,
+        "ownership_states": {
+            target: resolver.get_state(target).value
+            for target in resolver.states.keys()  # Only tracked libraries (those with "auto")
+        } if resolver.states else {},
         "decisions": {
             "initialize_provider": tracer_provider == "platform",
-            "instrument_fastapi": instrumentation_config.get("fastapi", False),
-            "instrument_httpx": instrumentation_config.get("httpx", False),
-            "instrument_requests": instrumentation_config.get("requests", False),
-            "instrument_langchain": instrumentation_config.get("langchain", False),
-            "instrument_mcp": instrumentation_config.get("mcp", False),
+            "instrument_fastapi": _should_instrument(instrumentation_config.get("fastapi", False)),
+            "instrument_httpx": _should_instrument(instrumentation_config.get("httpx", False)),
+            "instrument_requests": _should_instrument(instrumentation_config.get("requests", False)),
+            "instrument_langchain": _should_instrument(instrumentation_config.get("langchain", False)),
+            "instrument_mcp": _should_instrument(instrumentation_config.get("mcp", False)),
         }
     })
 
@@ -52,40 +71,84 @@ def bootstrap(config: dict[str, Any] | None = None) -> None:
     else:
         LOGGER.info(f"TracerProvider ownership: {tracer_provider} - skipping platform initialization")
 
-    # Per-library instrumentation based on config flags
-    if instrumentation_config.get("fastapi", False):
-        LOGGER.info("Config enables FastAPI instrumentation")
-        instrument_fastapi()
-    else:
-        LOGGER.info("Config disables FastAPI instrumentation")
+    # Step 3: Set coordinator context flag for instrumentation calls
+    set_coordinator_context(True)
 
-    if instrumentation_config.get("httpx", False):
-        LOGGER.info("Config enables httpx instrumentation")
-        instrument_httpx()
-    else:
-        LOGGER.info("Config disables httpx instrumentation")
+    try:
+        # Per-library instrumentation based on config flags
+        # For explicit true/false: proceed as before
+        # For "auto": ownership wrapper will observe and decide
 
-    if instrumentation_config.get("requests", False):
-        LOGGER.info("Config enables requests instrumentation")
-        instrument_requests()
-    else:
-        LOGGER.info("Config disables requests instrumentation")
+        if _should_instrument(instrumentation_config.get("fastapi", False)):
+            LOGGER.info("Config enables FastAPI instrumentation")
+            instrument_fastapi()
+        else:
+            LOGGER.info("Config disables FastAPI instrumentation")
 
-    if instrumentation_config.get("langchain", False):
-        LOGGER.info("Config enables LangChain instrumentation")
-        instrument_langchain()
-    else:
-        LOGGER.info("Config disables LangChain instrumentation")
+        if _should_instrument(instrumentation_config.get("httpx", False)):
+            LOGGER.info("Config enables httpx instrumentation")
+            instrument_httpx()
+            # Ownership wrapper will check resolver state
+        else:
+            LOGGER.info("Config disables httpx instrumentation")
 
-    if instrumentation_config.get("mcp", False):
-        LOGGER.info("Config enables MCP instrumentation")
-        instrument_mcp()
-    else:
-        LOGGER.info("Config disables MCP instrumentation")
+        if _should_instrument(instrumentation_config.get("requests", False)):
+            LOGGER.info("Config enables requests instrumentation")
+            instrument_requests()
+        else:
+            LOGGER.info("Config disables requests instrumentation")
+
+        if _should_instrument(instrumentation_config.get("langchain", False)):
+            LOGGER.info("Config enables LangChain instrumentation")
+            instrument_langchain()
+        else:
+            LOGGER.info("Config disables LangChain instrumentation")
+
+        if _should_instrument(instrumentation_config.get("mcp", False)):
+            LOGGER.info("Config enables MCP instrumentation")
+            instrument_mcp()
+        else:
+            LOGGER.info("Config disables MCP instrumentation")
+
+    finally:
+        # Clear coordinator context flag
+        set_coordinator_context(False)
+
+    # Step 4: Ownership finalization happens lazily
+    # For libraries with "auto" config, finalization happens when:
+    # - App claims ownership explicitly (via instrumentor API wrapper)
+    # - Platform claims ownership on first use (via first-use wrapper)
+    # This ensures app has a chance to claim ownership during main.py startup
+    _emit_diagnostics("bootstrap_complete", {
+        "ownership_states": {
+            target: resolver.get_state(target).value
+            for target in resolver.states.keys()
+        } if resolver.states else {"note": "No auto-detection configured"}
+    })
+
+
+def _should_instrument(config_value) -> bool:
+    """Determine if coordinator should attempt instrumentation during bootstrap.
+
+    - true: Yes, instrument immediately (explicit platform ownership)
+    - false: No, skip (explicit app ownership)
+    - "auto": No, defer to wrappers (ownership undecided until runtime)
+    """
+    if config_value is True:
+        return True
+    if config_value == "auto":
+        return False  # Don't instrument in bootstrap - let wrappers handle it
+    return False
 
 
 def _load_config() -> dict[str, Any]:
-    """Load simplified configuration from file."""
+    """Load simplified configuration from file.
+
+    Library fields can be:
+    - true: Platform instruments (explicit)
+    - false: App instruments (explicit)
+    - "auto": Runtime ownership resolution (auto-detection)
+    """
     config: dict[str, Any] = {
         "instrumentation": {
             "tracerProvider": "platform",
@@ -116,11 +179,14 @@ def _load_config() -> dict[str, Any]:
                 if file_config and "instrumentation" in file_config:
                     inst_config = file_config["instrumentation"]
                     config["instrumentation"]["tracerProvider"] = inst_config.get("tracerProvider", "platform")
-                    config["instrumentation"]["fastapi"] = inst_config.get("fastapi", False)
-                    config["instrumentation"]["httpx"] = inst_config.get("httpx", False)
-                    config["instrumentation"]["requests"] = inst_config.get("requests", False)
-                    config["instrumentation"]["langchain"] = inst_config.get("langchain", False)
-                    config["instrumentation"]["mcp"] = inst_config.get("mcp", False)
+
+                    # Read library fields - can be bool or "auto" string
+                    for lib in ["fastapi", "httpx", "requests", "langchain", "mcp"]:
+                        if lib in inst_config:
+                            value = inst_config[lib]
+                            # Keep bool or "auto" string as-is
+                            config["instrumentation"][lib] = value
+
                     LOGGER.info(f"Loaded instrumentation config from {config_file}")
 
                 # Read telemetry config

@@ -40,8 +40,13 @@ type InstrumentationSpec struct {
 	// FastAPI enables FastAPI instrumentation. Defaults to true if enableInstrumentation is true.
 	FastAPI *bool `json:"fastapi,omitempty"`
 
-	// HTTPX enables httpx client instrumentation. Defaults to true if enableInstrumentation is true.
-	HTTPX *bool `json:"httpx,omitempty"`
+	// HTTPX enables httpx client instrumentation.
+	// Can be:
+	// - true: Platform instruments (explicit)
+	// - false: App instruments (explicit)
+	// - "auto": Runtime ownership resolution (auto-detection)
+	// - omitted: Defaults to true if enableInstrumentation is true
+	HTTPX interface{} `json:"httpx,omitempty"`
 
 	// Requests enables requests library instrumentation. Defaults to true if enableInstrumentation is true.
 	Requests *bool `json:"requests,omitempty"`

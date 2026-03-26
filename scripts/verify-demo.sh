@@ -35,7 +35,7 @@ require_grep() {
 }
 
 log_step "Checking custom resources and generated Instrumentation resources"
-for demo in no-existing partial-existing full-existing; do
+for demo in no-existing partial-existing full-existing auto-httpx; do
   require_resource "AgentObservabilityDemo/${demo} exists" kubectl get agentobservabilitydemo "${demo}" -n "${DEMO_NAMESPACE}"
   require_resource "Instrumentation/${demo}-instrumentation exists" kubectl get instrumentation "${demo}-instrumentation" -n "${DEMO_NAMESPACE}"
 done
@@ -47,7 +47,7 @@ require_grep \
   kubectl logs -n "${OPERATOR_NAMESPACE}" deployment/agent-observability-operator --tail=400
 
 log_step "Checking mutated workload pods"
-for workload in agent-no-existing agent-partial-existing agent-full-existing; do
+for workload in agent-no-existing agent-partial-existing agent-full-existing agent-auto-httpx; do
   pod=$(kubectl get pods -n "${DEMO_NAMESPACE}" -l "app.kubernetes.io/name=${workload}" -o jsonpath='{.items[0].metadata.name}')
   if [[ -z "${pod}" ]]; then
     echo "FAIL: could not find Pod for ${workload}" >&2
@@ -132,6 +132,8 @@ check_config_decision() {
 check_config_decision agent-no-existing true true true true true true
 check_config_decision agent-partial-existing false false true true false true
 check_config_decision agent-full-existing false false false false false false
+# agent-auto-httpx: App instruments httpx (auto-detected), platform handles requests/mcp
+check_config_decision agent-auto-httpx false false false true false true
 
 log_step "Checking collector and Jaeger are reachable inside the cluster"
 require_resource "Collector deployment is available" kubectl get deployment demo-collector-collector -n "${OBS_NAMESPACE}"

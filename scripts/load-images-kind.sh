@@ -11,6 +11,7 @@ for image in \
   demo-agent-no-existing \
   demo-agent-partial-existing \
   demo-agent-full-existing \
+  demo-agent-auto-httpx \
   mcp-server
 
 do
