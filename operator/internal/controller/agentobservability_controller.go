@@ -553,6 +553,15 @@ func validateInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) err
 				strings.Join(conflictingFields, ", "),
 			)
 		}
+
+		// Check for contradiction: enableInstrumentation: false with tracerProvider: platform
+		if spec.TracerProvider != nil && *spec.TracerProvider == "platform" {
+			return fmt.Errorf(
+				"enableInstrumentation is false but tracerProvider is 'platform'. "+
+				"If auto-instrumentation is disabled, the platform should not initialize the TracerProvider. "+
+				"Either set enableInstrumentation to true or set tracerProvider to 'app'",
+			)
+		}
 	}
 
 	return nil

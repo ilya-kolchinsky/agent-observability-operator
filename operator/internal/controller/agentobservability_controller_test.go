@@ -11,8 +11,9 @@ import (
 
 func TestBuildDesiredInstrumentationMapsCRSpec(t *testing.T) {
 	demo := testDemo()
+	resolvedSpec := resolveInstrumentationSpec(&demo.Spec.Instrumentation)
 
-	instrumentation := buildDesiredInstrumentation(demo, demo.Spec.Target.Namespace)
+	instrumentation := buildDesiredInstrumentation(demo, demo.Spec.Target.Namespace, resolvedSpec)
 
 	if instrumentation.Name != "sample-demo-instrumentation" {
 		t.Fatalf("expected generated name, got %q", instrumentation.Name)
@@ -34,8 +35,9 @@ func TestBuildDesiredInstrumentationMapsCRSpec(t *testing.T) {
 func TestBuildDesiredInstrumentationFallsBackToDefaultCollectorService(t *testing.T) {
 	demo := testDemo()
 	demo.Spec.Instrumentation.OTelCollectorEndpoint = ""
+	resolvedSpec := resolveInstrumentationSpec(&demo.Spec.Instrumentation)
 
-	instrumentation := buildDesiredInstrumentation(demo, demo.Spec.Target.Namespace)
+	instrumentation := buildDesiredInstrumentation(demo, demo.Spec.Target.Namespace, resolvedSpec)
 
 	if instrumentation.Spec.Exporter.Endpoint != defaultCollectorEndpoint {
 		t.Fatalf("expected default collector endpoint %q, got %q", defaultCollectorEndpoint, instrumentation.Spec.Exporter.Endpoint)
@@ -44,8 +46,9 @@ func TestBuildDesiredInstrumentationFallsBackToDefaultCollectorService(t *testin
 
 func TestBuildDesiredRuntimeCoordinatorConfigMapMapsCRSpec(t *testing.T) {
 	demo := testDemo()
+	resolvedSpec := resolveInstrumentationSpec(&demo.Spec.Instrumentation)
 
-	configMap := buildDesiredRuntimeCoordinatorConfigMap(demo, demo.Spec.Target.Namespace)
+	configMap := buildDesiredRuntimeCoordinatorConfigMap(demo, demo.Spec.Target.Namespace, resolvedSpec)
 
 	if configMap.Name != "sample-demo-runtime-coordinator" {
 		t.Fatalf("expected generated configmap name, got %q", configMap.Name)
@@ -55,14 +58,19 @@ func TestBuildDesiredRuntimeCoordinatorConfigMapMapsCRSpec(t *testing.T) {
 	}
 	config := configMap.Data[runtimeCoordinatorConfigMapKey]
 	for _, expected := range []string{
-		"runtimeCoordinator:",
-		"diagnosticsLevel: \"basic\"",
-		"detectFrameworkInstrumentation: true",
-		"disableDuplicateInstrumentations: true",
+		"instrumentation:",
+		"tracerProvider: \"platform\"",
+		"fastapi: true",
+		"httpx: true",
+		"requests: true",
+		"langchain: true",
+		"mcp: true",
+		"telemetry:",
 		"exporterEndpoint: \"http://agent-observability-collector.observability.svc.cluster.local:4318\"",
 		"tracesEndpoint: \"http://agent-observability-collector.observability.svc.cluster.local:4318/v1/traces\"",
 		"protocol: \"http/protobuf\"",
 		"serviceName: \"agent-chat\"",
+		"serviceNamespace: \"target-ns\"",
 		"deploymentName: \"agent-chat\"",
 	} {
 		if !contains(config, expected) {
@@ -73,7 +81,8 @@ func TestBuildDesiredRuntimeCoordinatorConfigMapMapsCRSpec(t *testing.T) {
 
 func TestPrepareDeploymentForInstrumentationOnlyPatchesSelectedContainerAndIsIdempotent(t *testing.T) {
 	demo := testDemo()
-	instrumentation := buildDesiredInstrumentation(demo, demo.Spec.Target.Namespace)
+	resolvedSpec := resolveInstrumentationSpec(&demo.Spec.Instrumentation)
+	instrumentation := buildDesiredInstrumentation(demo, demo.Spec.Target.Namespace, resolvedSpec)
 	deployment := &appsv1.Deployment{}
 	deployment.Name = "agent-chat"
 	deployment.Namespace = "target-ns"
@@ -137,7 +146,8 @@ func TestPrepareDeploymentForInstrumentationOnlyPatchesSelectedContainerAndIsIde
 
 func TestPrepareDeploymentForInstrumentationErrorsWhenContainerMissing(t *testing.T) {
 	demo := testDemo()
-	instrumentation := buildDesiredInstrumentation(demo, demo.Spec.Target.Namespace)
+	resolvedSpec := resolveInstrumentationSpec(&demo.Spec.Instrumentation)
+	instrumentation := buildDesiredInstrumentation(demo, demo.Spec.Target.Namespace, resolvedSpec)
 	deployment := &appsv1.Deployment{}
 	deployment.Name = "agent-chat"
 	deployment.Namespace = "target-ns"
@@ -154,9 +164,10 @@ func TestPrepareDeploymentForInstrumentationErrorsWhenContainerMissing(t *testin
 
 func TestInstrumentationDriftedDetectsSpecAndLabelChanges(t *testing.T) {
 	demo := testDemo()
+	resolvedSpec := resolveInstrumentationSpec(&demo.Spec.Instrumentation)
 
-	desired := buildDesiredInstrumentation(demo, "default")
-	matching := buildDesiredInstrumentation(demo, "default")
+	desired := buildDesiredInstrumentation(demo, "default", resolvedSpec)
+	matching := buildDesiredInstrumentation(demo, "default", resolvedSpec)
 	if instrumentationDrifted(matching, desired) {
 		t.Fatal("expected identical instrumentation to be treated as in sync")
 	}
@@ -177,18 +188,13 @@ func testDemo() *platformv1alpha1.AgentObservabilityDemo {
 	demo.Spec.Target.ContainerName = "app"
 	demo.Spec.Instrumentation.CustomPythonImage = "agent-observability/custom-python-autoinstrumentation:latest"
 	demo.Spec.Instrumentation.OTelCollectorEndpoint = defaultCollectorEndpoint
-	demo.Spec.RuntimeCoordinator.Enabled = true
-	demo.Spec.RuntimeCoordinator.DiagnosticsLevel = "basic"
-	demo.Spec.RuntimeCoordinator.Heuristics.DetectExistingProvider = true
-	demo.Spec.RuntimeCoordinator.Heuristics.DetectSpanProcessors = true
-	demo.Spec.RuntimeCoordinator.Heuristics.DetectFrameworkInstrumentation = true
-	demo.Spec.RuntimeCoordinator.Heuristics.DetectKnownVendorTracing = true
-	demo.Spec.RuntimeCoordinator.Patchers.HTTPClient = true
-	demo.Spec.RuntimeCoordinator.Patchers.GRPCClient = true
-	demo.Spec.RuntimeCoordinator.Patchers.ASGI = true
-	demo.Spec.RuntimeCoordinator.Patchers.GenAIOpenAI = true
-	demo.Spec.RuntimeCoordinator.Patchers.MCPBoundary = true
-	demo.Spec.RuntimeCoordinator.Suppression.DisableDuplicateInstrumentations = true
+	demo.Spec.Instrumentation.EnableInstrumentation = boolPtr(true)
+	demo.Spec.Instrumentation.TracerProvider = stringPtr("platform")
+	demo.Spec.Instrumentation.FastAPI = boolPtr(true)
+	demo.Spec.Instrumentation.HTTPX = boolPtr(true)
+	demo.Spec.Instrumentation.Requests = boolPtr(true)
+	demo.Spec.Instrumentation.LangChain = boolPtr(true)
+	demo.Spec.Instrumentation.MCP = boolPtr(true)
 	return demo
 }
 
