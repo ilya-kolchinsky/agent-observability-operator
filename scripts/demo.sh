@@ -28,8 +28,10 @@ step '6. Deploy demo app variants'
 step '7. Apply the custom AgentObservabilityDemo resources'
 "${SCRIPT_DIR}/apply-sample-crs.sh"
 
-step '7b. Wait for operator to reconcile and create Instrumentation resources'
-printf 'Waiting for Instrumentation resources to be created...\n'
+step '7b. Wait for operator to reconcile and pods to be instrumented'
+printf 'Waiting for Instrumentation resources and instrumented pods...\n'
+
+# First, wait for Instrumentation resources to be created
 for demo in no-existing partial-existing full-existing; do
   timeout=30
   while ! kubectl get instrumentation "${demo}-instrumentation" -n demo-apps >/dev/null 2>&1; do
@@ -41,6 +43,37 @@ for demo in no-existing partial-existing full-existing; do
     timeout=$((timeout - 1))
   done
   echo "✓ Instrumentation/${demo}-instrumentation created"
+done
+
+# Then wait for running pods to actually have the instrumentation annotation
+# (This implicitly confirms Deployments were patched and rollout completed)
+for workload in agent-no-existing agent-partial-existing agent-full-existing; do
+  timeout=60
+  while true; do
+    pod=$(kubectl get pods -n demo-apps -l "app.kubernetes.io/name=${workload}" --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [[ -z "${pod}" ]]; then
+      if [ $timeout -le 0 ]; then
+        echo "ERROR: Timeout waiting for running pod for ${workload}"
+        exit 1
+      fi
+      sleep 1
+      timeout=$((timeout - 1))
+      continue
+    fi
+
+    annotation=$(kubectl get pod "${pod}" -n demo-apps -o jsonpath='{.metadata.annotations.instrumentation\.opentelemetry\.io/inject-python}' 2>/dev/null || echo "")
+    if [[ -n "${annotation}" ]]; then
+      echo "✓ Pod ${pod} has inject-python annotation: ${annotation}"
+      break
+    fi
+
+    if [ $timeout -le 0 ]; then
+      echo "ERROR: Timeout waiting for pod ${pod} to have inject-python annotation"
+      exit 1
+    fi
+    sleep 1
+    timeout=$((timeout - 1))
+  done
 done
 
 step '8. Verify generated resources and pod mutation before sending traffic'
