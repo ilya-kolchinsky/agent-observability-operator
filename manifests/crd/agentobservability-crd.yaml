@@ -129,8 +129,15 @@ spec:
                       x-kubernetes-preserve-unknown-fields: true
                       nullable: true
                     mcp:
-                      type: boolean
-                      description: Enable MCP boundary instrumentation (defaults to true when enableInstrumentation is true)
+                      description: |-
+                        Enable MCP boundary instrumentation. Can be:
+                        - true: Platform instruments (explicit)
+                        - false: App instruments (explicit)
+                        - "auto": NOT SUPPORTED - validation will reject this value
+                        - omitted: Defaults to true when enableInstrumentation is true
+                        Note: "auto" is not supported for MCP because it uses custom instrumentation (no standard OTel instrumentor)
+                      x-kubernetes-preserve-unknown-fields: true
+                      nullable: true
             status:
               type: object
               properties:

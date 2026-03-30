@@ -326,6 +326,7 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 	httpxVal := httpxValue(resolvedSpec.HTTPX)
 	requestsVal := requestsValue(resolvedSpec.Requests)
 	langchainVal := langchainValue(resolvedSpec.LangChain)
+	mcpVal := mcpValue(resolvedSpec.MCP)
 
 	lines := []string{
 		"# Simplified config-based instrumentation",
@@ -335,7 +336,7 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 		fmt.Sprintf("  httpx: %s", httpxVal),  // Can be "true", "false", or "auto"
 		fmt.Sprintf("  requests: %s", requestsVal),  // Can be "true", "false", or "auto"
 		fmt.Sprintf("  langchain: %s", langchainVal),  // Can be "true" or "false" (auto rejected by validation)
-		fmt.Sprintf("  mcp: %t", boolPtrValue(resolvedSpec.MCP)),
+		fmt.Sprintf("  mcp: %s", mcpVal),  // Can be "true" or "false" (auto rejected by validation)
 		"telemetry:",
 		fmt.Sprintf("  exporterEndpoint: %s", yamlStringValue(collectorEndpoint)),
 		fmt.Sprintf("  tracesEndpoint: %s", yamlStringValue(collectorTracesEndpointForDemo(demo))),
@@ -547,7 +548,7 @@ func validateInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) err
 		if isLangChainTrue(spec.LangChain) {
 			conflictingFields = append(conflictingFields, "langchain: true")
 		}
-		if spec.MCP != nil && *spec.MCP {
+		if isMCPTrue(spec.MCP) {
 			conflictingFields = append(conflictingFields, "mcp: true")
 		}
 
@@ -579,6 +580,16 @@ func validateInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) err
 		)
 	}
 
+	// Check for unsupported mcp: auto
+	if isMCPAuto(spec.MCP) {
+		return fmt.Errorf(
+			"mcp: auto is not supported. "+
+				"MCP instrumentation uses custom boundary tracing (not a standard OTel instrumentor), "+
+				"so there are no ownership signals to detect. "+
+				"Use mcp: true (platform instruments MCP boundaries) or mcp: false (if your app handles MCP tracing)",
+		)
+	}
+
 	return nil
 }
 
@@ -605,7 +616,8 @@ func resolveInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) *pla
 	resolved.Requests = resolveRequestsField(spec.Requests, defaultLibValue)
 	// LangChain can be bool or "auto" string (auto will be rejected by validation)
 	resolved.LangChain = resolveLangChainField(spec.LangChain, defaultLibValue)
-	resolved.MCP = boolPtrOrDefault(spec.MCP, defaultLibValue)
+	// MCP can be bool or "auto" string (auto will be rejected by validation)
+	resolved.MCP = resolveMCPField(spec.MCP, defaultLibValue)
 
 	// Infer tracerProvider if not specified (respects explicit value)
 	if spec.TracerProvider != nil {
@@ -651,7 +663,7 @@ func inferTracerProvider(spec *platformv1alpha1.InstrumentationSpec) string {
 		isHTTPXFalse(spec.HTTPX) ||
 		isRequestsFalse(spec.Requests) ||
 		isLangChainFalse(spec.LangChain) ||
-		(spec.MCP != nil && !*spec.MCP) {
+		isMCPFalse(spec.MCP) {
 		return "app"
 	}
 
@@ -853,6 +865,68 @@ func isLangChainFalse(value interface{}) bool {
 
 // isLangChainAuto checks if langchain field is "auto" (not supported, will be rejected).
 func isLangChainAuto(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+
+	// Check if it's the string "auto"
+	if strVal, ok := value.(string); ok {
+		return strVal == "auto"
+	}
+
+	return false
+}
+
+// isMCPTrue checks if mcp field is explicitly true (not "auto", not false, not nil).
+func isMCPTrue(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+
+	// "auto" is not true
+	if _, ok := value.(string); ok {
+		return false  // "auto" doesn't count as true for validation
+	}
+
+	// Check if it's a bool true
+	if boolVal, ok := value.(bool); ok {
+		return boolVal
+	}
+
+	// Check if it's a *bool true
+	if boolPtr, ok := value.(*bool); ok {
+		return *boolPtr
+	}
+
+	return false
+}
+
+// isMCPFalse checks if mcp field is explicitly false (not "auto", not true, not nil).
+func isMCPFalse(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+
+	// "auto" is not false
+	if _, ok := value.(string); ok {
+		return false  // "auto" doesn't count as false for TracerProvider inference
+	}
+
+	// Check if it's a bool false
+	if boolVal, ok := value.(bool); ok {
+		return !boolVal
+	}
+
+	// Check if it's a *bool false
+	if boolPtr, ok := value.(*bool); ok {
+		return !*boolPtr
+	}
+
+	return false
+}
+
+// isMCPAuto checks if mcp field is "auto" (not supported, will be rejected).
+func isMCPAuto(value interface{}) bool {
 	if value == nil {
 		return false
 	}
@@ -1091,6 +1165,65 @@ func resolveLangChainField(value interface{}, defaultBool bool) interface{} {
 // Returns either "true", "false", or "auto" as a string for YAML rendering.
 // Note: "auto" will be rejected during validation, but we handle it here for consistency.
 func langchainValue(value interface{}) string {
+	if value == nil {
+		return "false"
+	}
+
+	// Check if it's the string "auto" (will be rejected by validation)
+	if strVal, ok := value.(string); ok {
+		return strVal
+	}
+
+	// Check if it's a bool
+	if boolVal, ok := value.(bool); ok {
+		if boolVal {
+			return "true"
+		}
+		return "false"
+	}
+
+	// Check if it's a *bool
+	if boolPtr, ok := value.(*bool); ok {
+		if *boolPtr {
+			return "true"
+		}
+		return "false"
+	}
+
+	return "false"
+}
+
+// resolveMCPField handles the mcp field which can be bool or "auto" string.
+// Note: "auto" will be rejected during validation, but we handle it here for consistency.
+func resolveMCPField(value interface{}, defaultBool bool) interface{} {
+	if value == nil {
+		// Not specified - use default bool value
+		return &defaultBool
+	}
+
+	// Check if it's a string "auto" (will be rejected by validation)
+	if strVal, ok := value.(string); ok {
+		return strVal
+	}
+
+	// Check if it's a bool
+	if boolVal, ok := value.(bool); ok {
+		return &boolVal
+	}
+
+	// Check if it's a *bool
+	if boolPtr, ok := value.(*bool); ok {
+		return boolPtr
+	}
+
+	// Fallback to default
+	return &defaultBool
+}
+
+// mcpValue extracts the value from mcp field for config rendering.
+// Returns either "true", "false", or "auto" as a string for YAML rendering.
+// Note: "auto" will be rejected during validation, but we handle it here for consistency.
+func mcpValue(value interface{}) string {
 	if value == nil {
 		return "false"
 	}

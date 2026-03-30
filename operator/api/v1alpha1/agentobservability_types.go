@@ -70,8 +70,14 @@ type InstrumentationSpec struct {
 	// Note: "auto" is not supported for LangChain due to all-or-nothing instrumentation limitations
 	LangChain interface{} `json:"langchain,omitempty"`
 
-	// MCP enables MCP boundary instrumentation. Defaults to true if enableInstrumentation is true.
-	MCP *bool `json:"mcp,omitempty"`
+	// MCP enables MCP boundary instrumentation.
+	// Can be:
+	// - true: Platform instruments (explicit)
+	// - false: App instruments (explicit)
+	// - "auto": NOT SUPPORTED - will be rejected with validation error
+	// - omitted: Defaults to true if enableInstrumentation is true
+	// Note: "auto" is not supported for MCP because it uses custom instrumentation (no standard OTel instrumentor to observe)
+	MCP interface{} `json:"mcp,omitempty"`
 }
 
 // AgentObservabilityDemoStatus defines the observed state of AgentObservabilityDemo.
