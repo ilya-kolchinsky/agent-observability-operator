@@ -19,6 +19,7 @@ var InstrumentationPlugins = []InstrumentationPlugin{
 	&RequestsPlugin{},
 	&LangChainPlugin{},
 	&MCPPlugin{},
+	&OpenAIPlugin{},
 }
 
 // GetPlugin returns a plugin by name.

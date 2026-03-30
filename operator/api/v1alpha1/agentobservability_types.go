@@ -63,6 +63,11 @@ type InstrumentationSpec struct {
 	// Note: "auto" is NOT supported - validation will reject it
 	// Generated field - see operator/api/v1alpha1/agentobservability_types_generated.go
 	MCP interface{} `json:"mcp,omitempty"`
+
+	// OpenAI enables openai instrumentation.
+	// Can be: true (platform), false (app), "auto" (runtime detection), or omitted (defaults to EnableInstrumentation)
+	// Generated field - see operator/api/v1alpha1/agentobservability_types_generated.go
+	OpenAI interface{} `json:"openai,omitempty"`
 }
 
 // AgentObservabilityDemoStatus defines the observed state of AgentObservabilityDemo.

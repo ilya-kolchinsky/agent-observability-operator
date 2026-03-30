@@ -18,6 +18,7 @@ from .fastapi import FastAPIPlugin
 from .httpx import HTTPXPlugin
 from .langchain import LangChainPlugin
 from .mcp import MCPPlugin
+from .openai import OpenAIPlugin
 from .requests import RequestsPlugin
 
 if TYPE_CHECKING:
@@ -31,6 +32,7 @@ INSTRUMENTATION_PLUGINS: list[InstrumentationPlugin] = [
     RequestsPlugin(),
     LangChainPlugin(),
     MCPPlugin(),
+    OpenAIPlugin(),
 ]
 
 

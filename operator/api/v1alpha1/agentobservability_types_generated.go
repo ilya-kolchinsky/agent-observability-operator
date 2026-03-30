@@ -52,4 +52,12 @@ type InstrumentationPluginFields struct {
 	// - omitted: Defaults to EnableInstrumentation value
 	MCP interface{} `json:"mcp,omitempty"`
 
+	// Openai enables openai instrumentation.
+	// Can be:
+	// - true: Platform instruments (explicit)
+	// - false: App instruments (explicit)
+	// - "auto": Runtime ownership resolution (auto-detection)
+	// - omitted: Defaults to EnableInstrumentation value
+	Openai interface{} `json:"openai,omitempty"`
+
 }

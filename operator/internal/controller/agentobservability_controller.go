@@ -662,6 +662,8 @@ func getPluginFieldValue(spec *platformv1alpha1.InstrumentationSpec, pluginName 
 		return spec.LangChain
 	case "mcp":
 		return spec.MCP
+	case "openai":
+		return spec.OpenAI
 	default:
 		return nil
 	}
@@ -681,6 +683,8 @@ func setPluginFieldValue(spec *platformv1alpha1.InstrumentationSpec, pluginName 
 		spec.LangChain = value
 	case "mcp":
 		spec.MCP = value
+	case "openai":
+		spec.OpenAI = value
 	}
 }
 
