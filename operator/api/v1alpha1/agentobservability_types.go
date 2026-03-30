@@ -37,8 +37,13 @@ type InstrumentationSpec struct {
 	// - At least one library field false → "app"
 	TracerProvider *string `json:"tracerProvider,omitempty"`
 
-	// FastAPI enables FastAPI instrumentation. Defaults to true if enableInstrumentation is true.
-	FastAPI *bool `json:"fastapi,omitempty"`
+	// FastAPI enables FastAPI instrumentation.
+	// Can be:
+	// - true: Platform instruments (explicit)
+	// - false: App instruments (explicit)
+	// - "auto": Runtime ownership resolution (auto-detection)
+	// - omitted: Defaults to true if enableInstrumentation is true
+	FastAPI interface{} `json:"fastapi,omitempty"`
 
 	// HTTPX enables httpx client instrumentation.
 	// Can be:

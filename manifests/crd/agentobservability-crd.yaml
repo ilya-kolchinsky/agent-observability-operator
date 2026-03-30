@@ -92,8 +92,14 @@ spec:
                         - platform
                         - app
                     fastapi:
-                      type: boolean
-                      description: Enable FastAPI instrumentation (defaults to true when enableInstrumentation is true)
+                      description: |-
+                        Enable FastAPI instrumentation. Can be:
+                        - true: Platform instruments (explicit)
+                        - false: App instruments (explicit)
+                        - "auto": Runtime ownership resolution (auto-detection)
+                        - omitted: Defaults to true when enableInstrumentation is true
+                      x-kubernetes-preserve-unknown-fields: true
+                      nullable: true
                     httpx:
                       description: |-
                         Enable httpx client instrumentation. Can be:

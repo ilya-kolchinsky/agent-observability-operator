@@ -58,6 +58,11 @@ def install_ownership_wrappers(config: dict):
         _wrap_requests_instrumentor()
         wrappers_installed.append("requests")
 
+    # Only wrap fastapi if configured with "auto"
+    if instrumentation_config.get("fastapi") == "auto":
+        _wrap_fastapi_instrumentor()
+        wrappers_installed.append("fastapi")
+
     if wrappers_installed:
         LOGGER.info(f"Ownership wrappers installed for: {', '.join(wrappers_installed)}")
     else:
@@ -375,6 +380,67 @@ def _remove_requests_first_use_wrapper():
         LOGGER.debug("requests first-use wrappers removed")
     except Exception as e:
         LOGGER.debug(f"Failed to remove requests first-use wrappers: {e}")
+
+
+def _wrap_fastapi_instrumentor():
+    """Wrap FastAPI for auto-detection.
+
+    Installs ONLY the instrumentor API wrapper (no first-use detection).
+    This demonstrates the scenario where:
+    - App doesn't instrument the library
+    - No first-use detection triggers
+    - Ownership stays UNDECIDED
+    - Result: No instrumentation at all
+    """
+    try:
+        from agent_obs_runtime.ownership import get_resolver
+
+        # Only wrap the instrumentor API - no first-use wrapper for FastAPI
+        _wrap_fastapi_instrumentor_api()
+
+        LOGGER.debug("fastapi instrumentor API wrapper installed (no first-use detection)")
+
+    except ImportError:
+        LOGGER.debug("fastapi not available, skipping wrapper installation")
+
+
+def _wrap_fastapi_instrumentor_api():
+    """Wrap FastAPIInstrumentor.instrument() to observe ownership claims.
+
+    Note: No first-use wrapper for FastAPI. If app doesn't explicitly call
+    .instrument(), ownership stays UNDECIDED and nothing gets instrumented.
+    """
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from agent_obs_runtime.ownership import get_resolver
+
+    # Store original instrument method
+    original_instrument = FastAPIInstrumentor.instrument
+
+    def ownership_aware_instrument(self, **kwargs):
+        """Wrapped instrument method that observes ownership claims."""
+        resolver = get_resolver()
+
+        if _in_coordinator_context():
+            # This call is from coordinator - check if we should proceed
+            if resolver.observe_platform_activation("fastapi"):
+                LOGGER.debug("Platform instrumenting FastAPI (ownership granted)")
+                _emit_ownership_resolved("fastapi", "platform")
+                return original_instrument(self, **kwargs)
+            else:
+                LOGGER.info("Skipping FastAPI instrumentation (app owns)")
+                return None
+        else:
+            # This call is from app - observe claim
+            if resolver.observe_app_claim("fastapi"):
+                LOGGER.info("App claiming FastAPI ownership (auto-detected)")
+                _emit_ownership_resolved("fastapi", "app")
+                return original_instrument(self, **kwargs)
+            else:
+                LOGGER.warning("App FastAPI instrumentation denied (platform owns) - no-op")
+                return None
+
+    # Replace the instrument method
+    FastAPIInstrumentor.instrument = ownership_aware_instrument
 
 
 def _emit_ownership_resolved(target: str, owner: str):
