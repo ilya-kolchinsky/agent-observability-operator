@@ -119,8 +119,15 @@ spec:
                       x-kubernetes-preserve-unknown-fields: true
                       nullable: true
                     langchain:
-                      type: boolean
-                      description: Enable LangChain instrumentation (defaults to true when enableInstrumentation is true)
+                      description: |-
+                        Enable LangChain instrumentation. Can be:
+                        - true: Platform instruments (explicit)
+                        - false: App instruments (explicit)
+                        - "auto": NOT SUPPORTED - validation will reject this value
+                        - omitted: Defaults to true when enableInstrumentation is true
+                        Note: "auto" is not supported for LangChain due to instrumentation library limitations
+                      x-kubernetes-preserve-unknown-fields: true
+                      nullable: true
                     mcp:
                       type: boolean
                       description: Enable MCP boundary instrumentation (defaults to true when enableInstrumentation is true)

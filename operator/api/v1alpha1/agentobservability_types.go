@@ -61,8 +61,14 @@ type InstrumentationSpec struct {
 	// - omitted: Defaults to true if enableInstrumentation is true
 	Requests interface{} `json:"requests,omitempty"`
 
-	// LangChain enables LangChain instrumentation. Defaults to true if enableInstrumentation is true.
-	LangChain *bool `json:"langchain,omitempty"`
+	// LangChain enables LangChain instrumentation.
+	// Can be:
+	// - true: Platform instruments (explicit)
+	// - false: App instruments (explicit)
+	// - "auto": NOT SUPPORTED - will be rejected with validation error
+	// - omitted: Defaults to true if enableInstrumentation is true
+	// Note: "auto" is not supported for LangChain due to all-or-nothing instrumentation limitations
+	LangChain interface{} `json:"langchain,omitempty"`
 
 	// MCP enables MCP boundary instrumentation. Defaults to true if enableInstrumentation is true.
 	MCP *bool `json:"mcp,omitempty"`

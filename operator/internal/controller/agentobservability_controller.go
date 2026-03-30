@@ -325,6 +325,7 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 	fastapiVal := fastapiValue(resolvedSpec.FastAPI)
 	httpxVal := httpxValue(resolvedSpec.HTTPX)
 	requestsVal := requestsValue(resolvedSpec.Requests)
+	langchainVal := langchainValue(resolvedSpec.LangChain)
 
 	lines := []string{
 		"# Simplified config-based instrumentation",
@@ -333,7 +334,7 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 		fmt.Sprintf("  fastapi: %s", fastapiVal),  // Can be "true", "false", or "auto"
 		fmt.Sprintf("  httpx: %s", httpxVal),  // Can be "true", "false", or "auto"
 		fmt.Sprintf("  requests: %s", requestsVal),  // Can be "true", "false", or "auto"
-		fmt.Sprintf("  langchain: %t", boolPtrValue(resolvedSpec.LangChain)),
+		fmt.Sprintf("  langchain: %s", langchainVal),  // Can be "true" or "false" (auto rejected by validation)
 		fmt.Sprintf("  mcp: %t", boolPtrValue(resolvedSpec.MCP)),
 		"telemetry:",
 		fmt.Sprintf("  exporterEndpoint: %s", yamlStringValue(collectorEndpoint)),
@@ -543,7 +544,7 @@ func validateInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) err
 		if isRequestsTrue(spec.Requests) {
 			conflictingFields = append(conflictingFields, "requests: true")
 		}
-		if spec.LangChain != nil && *spec.LangChain {
+		if isLangChainTrue(spec.LangChain) {
 			conflictingFields = append(conflictingFields, "langchain: true")
 		}
 		if spec.MCP != nil && *spec.MCP {
@@ -566,6 +567,16 @@ func validateInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) err
 				"Either set enableInstrumentation to true or set tracerProvider to 'app'",
 			)
 		}
+	}
+
+	// Check for unsupported langchain: auto
+	if isLangChainAuto(spec.LangChain) {
+		return fmt.Errorf(
+			"langchain: auto is not supported. "+
+				"The LangChain instrumentation library does not support fine-grained selective instrumentation, "+
+				"which prevents safe auto-detection when apps partially instrument LangChain components. "+
+				"Use langchain: true (platform instruments everything) or langchain: false (if your app instruments any LangChain components, even partially)",
+		)
 	}
 
 	return nil
@@ -592,7 +603,8 @@ func resolveInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) *pla
 	resolved.HTTPX = resolveHTTPXField(spec.HTTPX, defaultLibValue)
 	// Requests can be bool or "auto" string
 	resolved.Requests = resolveRequestsField(spec.Requests, defaultLibValue)
-	resolved.LangChain = boolPtrOrDefault(spec.LangChain, defaultLibValue)
+	// LangChain can be bool or "auto" string (auto will be rejected by validation)
+	resolved.LangChain = resolveLangChainField(spec.LangChain, defaultLibValue)
 	resolved.MCP = boolPtrOrDefault(spec.MCP, defaultLibValue)
 
 	// Infer tracerProvider if not specified (respects explicit value)
@@ -638,7 +650,7 @@ func inferTracerProvider(spec *platformv1alpha1.InstrumentationSpec) string {
 	if isFastAPIFalse(spec.FastAPI) ||
 		isHTTPXFalse(spec.HTTPX) ||
 		isRequestsFalse(spec.Requests) ||
-		(spec.LangChain != nil && !*spec.LangChain) ||
+		isLangChainFalse(spec.LangChain) ||
 		(spec.MCP != nil && !*spec.MCP) {
 		return "app"
 	}
@@ -786,6 +798,68 @@ func isRequestsFalse(value interface{}) bool {
 	// Check if it's a *bool false
 	if boolPtr, ok := value.(*bool); ok {
 		return !*boolPtr
+	}
+
+	return false
+}
+
+// isLangChainTrue checks if langchain field is explicitly true (not "auto", not false, not nil).
+func isLangChainTrue(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+
+	// "auto" is not true
+	if _, ok := value.(string); ok {
+		return false  // "auto" doesn't count as true for validation
+	}
+
+	// Check if it's a bool true
+	if boolVal, ok := value.(bool); ok {
+		return boolVal
+	}
+
+	// Check if it's a *bool true
+	if boolPtr, ok := value.(*bool); ok {
+		return *boolPtr
+	}
+
+	return false
+}
+
+// isLangChainFalse checks if langchain field is explicitly false (not "auto", not true, not nil).
+func isLangChainFalse(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+
+	// "auto" is not false
+	if _, ok := value.(string); ok {
+		return false  // "auto" doesn't count as false for TracerProvider inference
+	}
+
+	// Check if it's a bool false
+	if boolVal, ok := value.(bool); ok {
+		return !boolVal
+	}
+
+	// Check if it's a *bool false
+	if boolPtr, ok := value.(*bool); ok {
+		return !*boolPtr
+	}
+
+	return false
+}
+
+// isLangChainAuto checks if langchain field is "auto" (not supported, will be rejected).
+func isLangChainAuto(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+
+	// Check if it's the string "auto"
+	if strVal, ok := value.(string); ok {
+		return strVal == "auto"
 	}
 
 	return false
@@ -963,6 +1037,65 @@ func requestsValue(value interface{}) string {
 	}
 
 	// Check if it's the string "auto"
+	if strVal, ok := value.(string); ok {
+		return strVal
+	}
+
+	// Check if it's a bool
+	if boolVal, ok := value.(bool); ok {
+		if boolVal {
+			return "true"
+		}
+		return "false"
+	}
+
+	// Check if it's a *bool
+	if boolPtr, ok := value.(*bool); ok {
+		if *boolPtr {
+			return "true"
+		}
+		return "false"
+	}
+
+	return "false"
+}
+
+// resolveLangChainField handles the langchain field which can be bool or "auto" string.
+// Note: "auto" will be rejected during validation, but we handle it here for consistency.
+func resolveLangChainField(value interface{}, defaultBool bool) interface{} {
+	if value == nil {
+		// Not specified - use default bool value
+		return &defaultBool
+	}
+
+	// Check if it's a string "auto" (will be rejected by validation)
+	if strVal, ok := value.(string); ok {
+		return strVal
+	}
+
+	// Check if it's a bool
+	if boolVal, ok := value.(bool); ok {
+		return &boolVal
+	}
+
+	// Check if it's a *bool
+	if boolPtr, ok := value.(*bool); ok {
+		return boolPtr
+	}
+
+	// Fallback to default
+	return &defaultBool
+}
+
+// langchainValue extracts the value from langchain field for config rendering.
+// Returns either "true", "false", or "auto" as a string for YAML rendering.
+// Note: "auto" will be rejected during validation, but we handle it here for consistency.
+func langchainValue(value interface{}) string {
+	if value == nil {
+		return "false"
+	}
+
+	// Check if it's the string "auto" (will be rejected by validation)
 	if strVal, ok := value.(string); ok {
 		return strVal
 	}
