@@ -88,8 +88,8 @@ spec:
     otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
     enableInstrumentation: true
     tracerProvider: app           # App owns provider (inferred from langchain: false)
-    fastapi: auto                 # AUTO-DETECTION: App doesn't claim → stays UNDECIDED → not instrumented
+    fastapi: auto                 # AUTO-DETECTION: App uses FastAPI() → platform detects → platform owns
     httpx: auto                   # AUTO-DETECTION: App instruments → wrapper observes → app owns
-    requests: auto                # AUTO-DETECTION: App uses but doesn't instrument → platform owns
+    requests: auto                # AUTO-DETECTION: App neither instruments nor uses → UNDECIDED → not instrumented
     langchain: false              # App instruments LangChain in main.py
     mcp: true                     # Platform handles MCP

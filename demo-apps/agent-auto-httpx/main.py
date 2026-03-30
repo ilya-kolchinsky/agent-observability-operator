@@ -2,16 +2,16 @@
 
 This app demonstrates runtime ownership resolution with three different outcomes:
 - App initializes TracerProvider (tracerProvider: app)
-- FastAPI: "auto" → App does NOT instrument → ownership UNDECIDED → NO instrumentation
+- FastAPI: "auto" → App uses but doesn't instrument → ownership PLATFORM → instrumented by platform
 - httpx: "auto" → App instruments explicitly → ownership APP → instrumented by app
-- requests: "auto" → App uses but doesn't instrument → ownership PLATFORM → instrumented by platform
+- requests: "auto" → App neither instruments nor uses → ownership UNDECIDED → NOT instrumented
 - App instruments LangChain explicitly (langchain: false)
 - Platform handles MCP (mcp: true)
 
 Three auto-detection scenarios:
-1. fastapi: App doesn't claim ownership → stays UNDECIDED → not instrumented
-2. httpx: App explicitly claims ownership → APP owns → instrumented by app
-3. requests: Platform detects first use → PLATFORM owns → instrumented by platform
+1. fastapi: App creates FastAPI() instance → platform detects first use → PLATFORM owns
+2. httpx: App explicitly claims ownership via .instrument() → APP owns
+3. requests: App neither claims nor uses → stays UNDECIDED → not instrumented at all
 """
 
 import os
@@ -60,17 +60,9 @@ try:
 except Exception as e:
     print(f"[agent-auto-httpx] Failed to instrument LangChain: {e}", flush=True)
 
-# App uses requests WITHOUT instrumenting it - this triggers auto-detection
-# Config says requests: auto, so the first-use wrapper will detect this and
-# grant ownership to platform
-try:
-    import requests
-    # Simple connectivity check to trigger first-use detection
-    # Note: This may fail if httpbin.org is unreachable, but that's OK for the demo
-    response = requests.get("https://httpbin.org/status/200", timeout=2)
-    print(f"[agent-auto-httpx] App used requests (status={response.status_code}) - should trigger auto-detection", flush=True)
-except Exception as e:
-    print(f"[agent-auto-httpx] App attempted requests call (triggered auto-detection): {e}", flush=True)
+# App does NOT use requests library (config: requests: auto)
+# Ownership stays UNDECIDED → no instrumentation occurs
+print("[agent-auto-httpx] App not using requests library (config: auto, no usage detected)", flush=True)
 
 app = create_agent_app(
     build_scenario_config(

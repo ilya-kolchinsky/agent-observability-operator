@@ -226,6 +226,7 @@ def _remove_httpx_first_use_wrapper():
 # Storage for original methods
 _httpx_originals = {}
 _requests_originals = {}
+_fastapi_originals = {}
 
 
 def _wrap_requests_instrumentor():
@@ -385,31 +386,27 @@ def _remove_requests_first_use_wrapper():
 def _wrap_fastapi_instrumentor():
     """Wrap FastAPI for auto-detection.
 
-    Installs ONLY the instrumentor API wrapper (no first-use detection).
-    This demonstrates the scenario where:
-    - App doesn't instrument the library
-    - No first-use detection triggers
-    - Ownership stays UNDECIDED
-    - Result: No instrumentation at all
+    Installs TWO wrappers:
+    1. FastAPIInstrumentor.instrument() - to observe app ownership claims
+    2. fastapi.FastAPI.__init__() - to detect first use (app creating FastAPI instance)
     """
     try:
         from agent_obs_runtime.ownership import get_resolver
 
-        # Only wrap the instrumentor API - no first-use wrapper for FastAPI
+        # Part 1: Wrap the instrumentor API to observe app claims
         _wrap_fastapi_instrumentor_api()
 
-        LOGGER.debug("fastapi instrumentor API wrapper installed (no first-use detection)")
+        # Part 2: Wrap the FastAPI class to detect first use
+        _wrap_fastapi_first_use()
+
+        LOGGER.debug("fastapi wrappers installed (instrumentor + first-use detection)")
 
     except ImportError:
         LOGGER.debug("fastapi not available, skipping wrapper installation")
 
 
 def _wrap_fastapi_instrumentor_api():
-    """Wrap FastAPIInstrumentor.instrument() to observe ownership claims.
-
-    Note: No first-use wrapper for FastAPI. If app doesn't explicitly call
-    .instrument(), ownership stays UNDECIDED and nothing gets instrumented.
-    """
+    """Wrap FastAPIInstrumentor.instrument() to observe ownership claims."""
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
     from agent_obs_runtime.ownership import get_resolver
 
@@ -425,6 +422,8 @@ def _wrap_fastapi_instrumentor_api():
             if resolver.observe_platform_activation("fastapi"):
                 LOGGER.debug("Platform instrumenting FastAPI (ownership granted)")
                 _emit_ownership_resolved("fastapi", "platform")
+                # Remove first-use wrapper since we're instrumenting now
+                _remove_fastapi_first_use_wrapper()
                 return original_instrument(self, **kwargs)
             else:
                 LOGGER.info("Skipping FastAPI instrumentation (app owns)")
@@ -434,6 +433,8 @@ def _wrap_fastapi_instrumentor_api():
             if resolver.observe_app_claim("fastapi"):
                 LOGGER.info("App claiming FastAPI ownership (auto-detected)")
                 _emit_ownership_resolved("fastapi", "app")
+                # Remove first-use wrapper since app is handling instrumentation
+                _remove_fastapi_first_use_wrapper()
                 return original_instrument(self, **kwargs)
             else:
                 LOGGER.warning("App FastAPI instrumentation denied (platform owns) - no-op")
@@ -441,6 +442,68 @@ def _wrap_fastapi_instrumentor_api():
 
     # Replace the instrument method
     FastAPIInstrumentor.instrument = ownership_aware_instrument
+
+
+def _wrap_fastapi_first_use():
+    """Wrap fastapi.FastAPI.__init__() to detect first meaningful use.
+
+    If FastAPI is about to be instantiated but ownership is still UNDECIDED,
+    platform quickly instruments it and removes this wrapper.
+    """
+    try:
+        import fastapi
+        from agent_obs_runtime.ownership import get_resolver
+        from agent_obs_runtime.instrumentation import instrument_fastapi
+
+        # Store original __init__ method
+        _fastapi_originals["FastAPI.__init__"] = fastapi.FastAPI.__init__
+
+        def fastapi_init_wrapper(self, *args, **kwargs):
+            """Wrapper for fastapi.FastAPI.__init__() - detects first use."""
+            from agent_obs_runtime.ownership import OwnershipState
+            resolver = get_resolver()
+
+            # Check if ownership is still undecided
+            if resolver.get_state("fastapi") == OwnershipState.UNDECIDED:
+                LOGGER.info("Detected FastAPI instantiation with UNDECIDED ownership - platform instrumenting")
+
+                # Platform takes ownership and instruments
+                set_coordinator_context(True)
+                try:
+                    instrument_fastapi()  # This will trigger instrumentor wrapper which emits ownership_resolved
+                finally:
+                    set_coordinator_context(False)
+
+                # Remove this wrapper - no longer needed
+                _remove_fastapi_first_use_wrapper()
+
+            # Call original __init__ (now instrumented if needed)
+            original = _fastapi_originals.get("FastAPI.__init__")
+            if original:
+                return original(self, *args, **kwargs)
+            return fastapi.FastAPI.__init__(self, *args, **kwargs)
+
+        # Install wrapper
+        fastapi.FastAPI.__init__ = fastapi_init_wrapper
+        LOGGER.debug("fastapi first-use wrapper installed")
+
+    except Exception as e:
+        LOGGER.warning(f"Failed to install fastapi first-use wrapper: {e}")
+
+
+def _remove_fastapi_first_use_wrapper():
+    """Remove fastapi first-use wrapper after ownership is decided."""
+    try:
+        import fastapi
+
+        # Restore original method if we saved it
+        if "FastAPI.__init__" in _fastapi_originals:
+            fastapi.FastAPI.__init__ = _fastapi_originals["FastAPI.__init__"]
+            del _fastapi_originals["FastAPI.__init__"]
+
+        LOGGER.debug("fastapi first-use wrapper removed")
+    except Exception as e:
+        LOGGER.debug(f"Failed to remove fastapi first-use wrapper: {e}")
 
 
 def _emit_ownership_resolved(target: str, owner: str):
