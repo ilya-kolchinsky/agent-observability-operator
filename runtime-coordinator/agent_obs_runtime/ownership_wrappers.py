@@ -53,6 +53,11 @@ def install_ownership_wrappers(config: dict):
         _wrap_httpx_instrumentor()
         wrappers_installed.append("httpx")
 
+    # Only wrap requests if configured with "auto"
+    if instrumentation_config.get("requests") == "auto":
+        _wrap_requests_instrumentor()
+        wrappers_installed.append("requests")
+
     if wrappers_installed:
         LOGGER.info(f"Ownership wrappers installed for: {', '.join(wrappers_installed)}")
     else:
@@ -215,6 +220,161 @@ def _remove_httpx_first_use_wrapper():
 
 # Storage for original methods
 _httpx_originals = {}
+_requests_originals = {}
+
+
+def _wrap_requests_instrumentor():
+    """Wrap requests for auto-detection.
+
+    Installs TWO wrappers:
+    1. RequestsInstrumentor.instrument() - to observe app ownership claims
+    2. requests.request() - to detect first use and trigger platform instrumentation
+    """
+    try:
+        from agent_obs_runtime.ownership import get_resolver
+
+        # Part 1: Wrap the instrumentor API to observe app claims
+        _wrap_requests_instrumentor_api()
+
+        # Part 2: Wrap the actual requests library to detect first use
+        _wrap_requests_first_use()
+
+        LOGGER.debug("requests wrappers installed (instrumentor + first-use detection)")
+
+    except ImportError:
+        LOGGER.debug("requests not available, skipping wrapper installation")
+
+
+def _wrap_requests_instrumentor_api():
+    """Wrap RequestsInstrumentor.instrument() to observe ownership claims."""
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
+    from agent_obs_runtime.ownership import get_resolver
+
+    # Store original instrument method
+    original_instrument = RequestsInstrumentor.instrument
+
+    def ownership_aware_instrument(self, **kwargs):
+        """Wrapped instrument method that observes ownership claims."""
+        resolver = get_resolver()
+
+        if _in_coordinator_context():
+            # This call is from coordinator - check if we should proceed
+            if resolver.observe_platform_activation("requests"):
+                LOGGER.debug("Platform instrumenting requests (ownership granted)")
+                _emit_ownership_resolved("requests", "platform")
+                # Remove first-use wrapper since we're instrumenting now
+                _remove_requests_first_use_wrapper()
+                return original_instrument(self, **kwargs)
+            else:
+                LOGGER.info("Skipping requests instrumentation (app owns)")
+                return None
+        else:
+            # This call is from app - observe claim
+            if resolver.observe_app_claim("requests"):
+                LOGGER.info("App claiming requests ownership (auto-detected)")
+                _emit_ownership_resolved("requests", "app")
+                # Remove first-use wrapper since app is handling instrumentation
+                _remove_requests_first_use_wrapper()
+                return original_instrument(self, **kwargs)
+            else:
+                LOGGER.warning("App requests instrumentation denied (platform owns) - no-op")
+                return None
+
+    # Replace the instrument method
+    RequestsInstrumentor.instrument = ownership_aware_instrument
+
+
+def _wrap_requests_first_use():
+    """Wrap requests.request() to detect first meaningful use.
+
+    If requests is about to be used but ownership is still UNDECIDED,
+    platform quickly instruments it and removes this wrapper.
+    """
+    try:
+        import requests
+        from agent_obs_runtime.ownership import get_resolver
+        from agent_obs_runtime.instrumentation import instrument_requests
+
+        # Store original request function and Session.request method
+        _requests_originals["request"] = requests.request
+        _requests_originals["Session.request"] = requests.Session.request
+
+        def request_wrapper(*args, **kwargs):
+            """Wrapper for requests.request() - detects first use."""
+            from agent_obs_runtime.ownership import OwnershipState
+            resolver = get_resolver()
+
+            # Check if ownership is still undecided
+            if resolver.get_state("requests") == OwnershipState.UNDECIDED:
+                LOGGER.info("Detected first requests call with UNDECIDED ownership - platform instrumenting")
+
+                # Platform takes ownership and instruments
+                set_coordinator_context(True)
+                try:
+                    instrument_requests()  # This will trigger instrumentor wrapper which emits ownership_resolved
+                finally:
+                    set_coordinator_context(False)
+
+                # Remove this wrapper - no longer needed
+                _remove_requests_first_use_wrapper()
+
+            # Call original method (now instrumented if needed)
+            original = _requests_originals.get("request")
+            if original:
+                return original(*args, **kwargs)
+            return requests.request(*args, **kwargs)
+
+        def session_request_wrapper(self, *args, **kwargs):
+            """Wrapper for requests.Session.request() - detects first use."""
+            from agent_obs_runtime.ownership import OwnershipState
+            resolver = get_resolver()
+
+            # Check if ownership is still undecided
+            if resolver.get_state("requests") == OwnershipState.UNDECIDED:
+                LOGGER.info("Detected first requests.Session call with UNDECIDED ownership - platform instrumenting")
+
+                # Platform takes ownership and instruments
+                set_coordinator_context(True)
+                try:
+                    instrument_requests()  # This will trigger instrumentor wrapper which emits ownership_resolved
+                finally:
+                    set_coordinator_context(False)
+
+                # Remove this wrapper - no longer needed
+                _remove_requests_first_use_wrapper()
+
+            # Call original method (now instrumented if needed)
+            original = _requests_originals.get("Session.request")
+            if original:
+                return original(self, *args, **kwargs)
+            return requests.Session.request(self, *args, **kwargs)
+
+        # Install wrappers
+        requests.request = request_wrapper
+        requests.Session.request = session_request_wrapper
+        LOGGER.debug("requests first-use wrappers installed")
+
+    except Exception as e:
+        LOGGER.warning(f"Failed to install requests first-use wrappers: {e}")
+
+
+def _remove_requests_first_use_wrapper():
+    """Remove requests first-use wrappers after ownership is decided."""
+    try:
+        import requests
+
+        # Restore original methods if we saved them
+        if "request" in _requests_originals:
+            requests.request = _requests_originals["request"]
+            del _requests_originals["request"]
+
+        if "Session.request" in _requests_originals:
+            requests.Session.request = _requests_originals["Session.request"]
+            del _requests_originals["Session.request"]
+
+        LOGGER.debug("requests first-use wrappers removed")
+    except Exception as e:
+        LOGGER.debug(f"Failed to remove requests first-use wrappers: {e}")
 
 
 def _emit_ownership_resolved(target: str, owner: str):

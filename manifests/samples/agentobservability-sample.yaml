@@ -89,7 +89,7 @@ spec:
     enableInstrumentation: true
     tracerProvider: app           # App owns provider (inferred from fastapi: false)
     fastapi: false                # App instruments FastAPI in main.py
-    httpx: auto                   # AUTO-DETECTION: App instruments, wrapper observes claim
-    requests: true                # Platform handles requests
+    httpx: auto                   # AUTO-DETECTION: App instruments, wrapper observes → app owns
+    requests: auto                # AUTO-DETECTION: App doesn't instrument, wrapper detects → platform owns
     langchain: false              # App instruments LangChain in main.py
     mcp: true                     # Platform handles MCP

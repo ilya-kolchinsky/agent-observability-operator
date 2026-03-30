@@ -104,8 +104,14 @@ spec:
                       x-kubernetes-preserve-unknown-fields: true
                       nullable: true
                     requests:
-                      type: boolean
-                      description: Enable requests library instrumentation (defaults to true when enableInstrumentation is true)
+                      description: |-
+                        Enable requests library instrumentation. Can be:
+                        - true: Platform instruments (explicit)
+                        - false: App instruments (explicit)
+                        - "auto": Runtime ownership resolution (auto-detection)
+                        - omitted: Defaults to true when enableInstrumentation is true
+                      x-kubernetes-preserve-unknown-fields: true
+                      nullable: true
                     langchain:
                       type: boolean
                       description: Enable LangChain instrumentation (defaults to true when enableInstrumentation is true)

@@ -323,6 +323,7 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 	collectorEndpoint := collectorEndpointForDemo(demo)
 
 	httpxVal := httpxValue(resolvedSpec.HTTPX)
+	requestsVal := requestsValue(resolvedSpec.Requests)
 
 	lines := []string{
 		"# Simplified config-based instrumentation",
@@ -330,7 +331,7 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 		fmt.Sprintf("  tracerProvider: %s", yamlStringValue(stringPtrValue(resolvedSpec.TracerProvider))),
 		fmt.Sprintf("  fastapi: %t", boolPtrValue(resolvedSpec.FastAPI)),
 		fmt.Sprintf("  httpx: %s", httpxVal),  // Can be "true", "false", or "auto"
-		fmt.Sprintf("  requests: %t", boolPtrValue(resolvedSpec.Requests)),
+		fmt.Sprintf("  requests: %s", requestsVal),  // Can be "true", "false", or "auto"
 		fmt.Sprintf("  langchain: %t", boolPtrValue(resolvedSpec.LangChain)),
 		fmt.Sprintf("  mcp: %t", boolPtrValue(resolvedSpec.MCP)),
 		"telemetry:",
@@ -538,7 +539,7 @@ func validateInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) err
 		if isHTTPXTrue(spec.HTTPX) {
 			conflictingFields = append(conflictingFields, "httpx: true")
 		}
-		if spec.Requests != nil && *spec.Requests {
+		if isRequestsTrue(spec.Requests) {
 			conflictingFields = append(conflictingFields, "requests: true")
 		}
 		if spec.LangChain != nil && *spec.LangChain {
@@ -585,9 +586,10 @@ func resolveInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) *pla
 
 	// Apply library field values (use explicit if set, otherwise use default)
 	resolved.FastAPI = boolPtrOrDefault(spec.FastAPI, defaultLibValue)
-	// HTTPX is special - can be bool or "auto" string
+	// HTTPX can be bool or "auto" string
 	resolved.HTTPX = resolveHTTPXField(spec.HTTPX, defaultLibValue)
-	resolved.Requests = boolPtrOrDefault(spec.Requests, defaultLibValue)
+	// Requests can be bool or "auto" string
+	resolved.Requests = resolveRequestsField(spec.Requests, defaultLibValue)
 	resolved.LangChain = boolPtrOrDefault(spec.LangChain, defaultLibValue)
 	resolved.MCP = boolPtrOrDefault(spec.MCP, defaultLibValue)
 
@@ -633,7 +635,7 @@ func inferTracerProvider(spec *platformv1alpha1.InstrumentationSpec) string {
 	// If any library is explicitly disabled, the app must have existing instrumentation
 	if (spec.FastAPI != nil && !*spec.FastAPI) ||
 		isHTTPXFalse(spec.HTTPX) ||
-		(spec.Requests != nil && !*spec.Requests) ||
+		isRequestsFalse(spec.Requests) ||
 		(spec.LangChain != nil && !*spec.LangChain) ||
 		(spec.MCP != nil && !*spec.MCP) {
 		return "app"
@@ -669,6 +671,54 @@ func isHTTPXTrue(value interface{}) bool {
 
 // isHTTPXFalse checks if httpx field is explicitly false (not "auto", not true, not nil).
 func isHTTPXFalse(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+
+	// "auto" is not false
+	if _, ok := value.(string); ok {
+		return false  // "auto" doesn't count as false for TracerProvider inference
+	}
+
+	// Check if it's a bool false
+	if boolVal, ok := value.(bool); ok {
+		return !boolVal
+	}
+
+	// Check if it's a *bool false
+	if boolPtr, ok := value.(*bool); ok {
+		return !*boolPtr
+	}
+
+	return false
+}
+
+// isRequestsTrue checks if requests field is explicitly true (not "auto", not false, not nil).
+func isRequestsTrue(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+
+	// "auto" is not true
+	if _, ok := value.(string); ok {
+		return false  // "auto" doesn't count as true for validation
+	}
+
+	// Check if it's a bool true
+	if boolVal, ok := value.(bool); ok {
+		return boolVal
+	}
+
+	// Check if it's a *bool true
+	if boolPtr, ok := value.(*bool); ok {
+		return *boolPtr
+	}
+
+	return false
+}
+
+// isRequestsFalse checks if requests field is explicitly false (not "auto", not true, not nil).
+func isRequestsFalse(value interface{}) bool {
 	if value == nil {
 		return false
 	}
@@ -744,6 +794,63 @@ func resolveHTTPXField(value interface{}, defaultBool bool) interface{} {
 // httpxValue extracts the value from httpx field for config rendering.
 // Returns either "true", "false", or "auto" as a string for YAML rendering.
 func httpxValue(value interface{}) string {
+	if value == nil {
+		return "false"
+	}
+
+	// Check if it's the string "auto"
+	if strVal, ok := value.(string); ok {
+		return strVal
+	}
+
+	// Check if it's a bool
+	if boolVal, ok := value.(bool); ok {
+		if boolVal {
+			return "true"
+		}
+		return "false"
+	}
+
+	// Check if it's a *bool
+	if boolPtr, ok := value.(*bool); ok {
+		if *boolPtr {
+			return "true"
+		}
+		return "false"
+	}
+
+	return "false"
+}
+
+// resolveRequestsField handles the requests field which can be bool or "auto" string.
+func resolveRequestsField(value interface{}, defaultBool bool) interface{} {
+	if value == nil {
+		// Not specified - use default bool value
+		return &defaultBool
+	}
+
+	// Check if it's a string "auto"
+	if strVal, ok := value.(string); ok {
+		return strVal
+	}
+
+	// Check if it's a bool
+	if boolVal, ok := value.(bool); ok {
+		return &boolVal
+	}
+
+	// Check if it's a *bool
+	if boolPtr, ok := value.(*bool); ok {
+		return boolPtr
+	}
+
+	// Fallback to default
+	return &defaultBool
+}
+
+// requestsValue extracts the value from requests field for config rendering.
+// Returns either "true", "false", or "auto" as a string for YAML rendering.
+func requestsValue(value interface{}) string {
 	if value == nil {
 		return "false"
 	}

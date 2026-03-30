@@ -132,8 +132,9 @@ check_config_decision() {
 check_config_decision agent-no-existing true true true true true true
 check_config_decision agent-partial-existing false false true true false true
 check_config_decision agent-full-existing false false false false false false
-# agent-auto-httpx: App instruments httpx (auto-detected), platform handles requests/mcp
-check_config_decision agent-auto-httpx false false false true false true
+# agent-auto-httpx: Both httpx and requests are "auto" (deferred to runtime wrappers)
+# Bootstrap decisions show false for both (instrumentation deferred)
+check_config_decision agent-auto-httpx false false false false false true
 
 log_step "Checking collector and Jaeger are reachable inside the cluster"
 require_resource "Collector deployment is available" kubectl get deployment demo-collector-collector -n "${OBS_NAMESPACE}"

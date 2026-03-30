@@ -1,15 +1,16 @@
-"""Demo agent with auto-detection for httpx ownership.
+"""Demo agent with auto-detection for httpx and requests ownership.
 
 This app demonstrates runtime ownership resolution:
 - App initializes TracerProvider (tracerProvider: app)
 - App instruments FastAPI explicitly (fastapi: false)
-- App instruments httpx explicitly - THIS WILL BE AUTO-DETECTED (httpx: auto)
-- Platform handles requests (requests: true)
+- App instruments httpx explicitly - AUTO-DETECTED AS APP OWNED (httpx: auto)
+- App does NOT instrument requests - AUTO-DETECTED AS PLATFORM OWNED (requests: auto)
 - App instruments LangChain explicitly (langchain: false)
 - Platform handles MCP (mcp: true)
 
-The ownership wrapper will observe the app's HTTPXClientInstrumentor().instrument()
-call and grant ownership to the app, even though the config says "auto".
+The ownership wrappers will:
+1. Observe app's HTTPXClientInstrumentor().instrument() → grant httpx ownership to app
+2. Detect first requests.get() call → grant requests ownership to platform
 """
 
 import os
@@ -61,6 +62,18 @@ try:
     print("[agent-auto-httpx] App instrumented LangChain", flush=True)
 except Exception as e:
     print(f"[agent-auto-httpx] Failed to instrument LangChain: {e}", flush=True)
+
+# App uses requests WITHOUT instrumenting it - this triggers auto-detection
+# Config says requests: auto, so the first-use wrapper will detect this and
+# grant ownership to platform
+try:
+    import requests
+    # Simple connectivity check to trigger first-use detection
+    # Note: This may fail if httpbin.org is unreachable, but that's OK for the demo
+    response = requests.get("https://httpbin.org/status/200", timeout=2)
+    print(f"[agent-auto-httpx] App used requests (status={response.status_code}) - should trigger auto-detection", flush=True)
+except Exception as e:
+    print(f"[agent-auto-httpx] App attempted requests call (triggered auto-detection): {e}", flush=True)
 
 app = create_agent_app(
     build_scenario_config(

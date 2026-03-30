@@ -48,8 +48,13 @@ type InstrumentationSpec struct {
 	// - omitted: Defaults to true if enableInstrumentation is true
 	HTTPX interface{} `json:"httpx,omitempty"`
 
-	// Requests enables requests library instrumentation. Defaults to true if enableInstrumentation is true.
-	Requests *bool `json:"requests,omitempty"`
+	// Requests enables requests library instrumentation.
+	// Can be:
+	// - true: Platform instruments (explicit)
+	// - false: App instruments (explicit)
+	// - "auto": Runtime ownership resolution (auto-detection)
+	// - omitted: Defaults to true if enableInstrumentation is true
+	Requests interface{} `json:"requests,omitempty"`
 
 	// LangChain enables LangChain instrumentation. Defaults to true if enableInstrumentation is true.
 	LangChain *bool `json:"langchain,omitempty"`

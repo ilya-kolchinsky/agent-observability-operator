@@ -41,9 +41,9 @@ class OwnershipResolver:
         self.instrumentation_config = config.get("instrumentation", {})
 
         # List of libraries that support auto-detection
-        self.supported_auto_libraries = ["httpx"]
+        self.supported_auto_libraries = ["httpx", "requests"]
         # Future: add more libraries here
-        # ["httpx", "requests", "langchain"]
+        # ["langchain", "fastapi"]
 
         # Only track state for libraries configured with "auto"
         self.states: Dict[str, OwnershipState] = {}
