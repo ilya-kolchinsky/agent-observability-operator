@@ -6,6 +6,10 @@ REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 IMAGE_PREFIX=${IMAGE_PREFIX:-agent-observability}
 TAG=${TAG:-latest}
 
+# Generate requirements.txt from plugin dependencies
+echo "==> Generating requirements.txt from plugin dependencies"
+python "${REPO_ROOT}/scripts/generate-requirements.py"
+
 build_image() {
   local name=$1
   local dockerfile=$2

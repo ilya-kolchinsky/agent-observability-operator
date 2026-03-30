@@ -37,46 +37,31 @@ type InstrumentationSpec struct {
 	// - At least one library field false → "app"
 	TracerProvider *string `json:"tracerProvider,omitempty"`
 
-	// FastAPI enables FastAPI instrumentation.
-	// Can be:
-	// - true: Platform instruments (explicit)
-	// - false: App instruments (explicit)
-	// - "auto": Runtime ownership resolution (auto-detection)
-	// - omitted: Defaults to true if enableInstrumentation is true
+	// FastAPI enables fastapi instrumentation.
+	// Can be: true (platform), false (app), "auto" (runtime detection), or omitted (defaults to EnableInstrumentation)
+	// Generated field - see operator/api/v1alpha1/agentobservability_types_generated.go
 	FastAPI interface{} `json:"fastapi,omitempty"`
 
-	// HTTPX enables httpx client instrumentation.
-	// Can be:
-	// - true: Platform instruments (explicit)
-	// - false: App instruments (explicit)
-	// - "auto": Runtime ownership resolution (auto-detection)
-	// - omitted: Defaults to true if enableInstrumentation is true
+	// HTTPX enables httpx instrumentation.
+	// Can be: true (platform), false (app), "auto" (runtime detection), or omitted (defaults to EnableInstrumentation)
+	// Generated field - see operator/api/v1alpha1/agentobservability_types_generated.go
 	HTTPX interface{} `json:"httpx,omitempty"`
 
-	// Requests enables requests library instrumentation.
-	// Can be:
-	// - true: Platform instruments (explicit)
-	// - false: App instruments (explicit)
-	// - "auto": Runtime ownership resolution (auto-detection)
-	// - omitted: Defaults to true if enableInstrumentation is true
+	// Requests enables requests instrumentation.
+	// Can be: true (platform), false (app), "auto" (runtime detection), or omitted (defaults to EnableInstrumentation)
+	// Generated field - see operator/api/v1alpha1/agentobservability_types_generated.go
 	Requests interface{} `json:"requests,omitempty"`
 
-	// LangChain enables LangChain instrumentation.
-	// Can be:
-	// - true: Platform instruments (explicit)
-	// - false: App instruments (explicit)
-	// - "auto": NOT SUPPORTED - will be rejected with validation error
-	// - omitted: Defaults to true if enableInstrumentation is true
-	// Note: "auto" is not supported for LangChain due to all-or-nothing instrumentation limitations
+	// LangChain enables langchain instrumentation.
+	// Can be: true (platform), false (app), or omitted (defaults to EnableInstrumentation)
+	// Note: "auto" is NOT supported - validation will reject it
+	// Generated field - see operator/api/v1alpha1/agentobservability_types_generated.go
 	LangChain interface{} `json:"langchain,omitempty"`
 
-	// MCP enables MCP boundary instrumentation.
-	// Can be:
-	// - true: Platform instruments (explicit)
-	// - false: App instruments (explicit)
-	// - "auto": NOT SUPPORTED - will be rejected with validation error
-	// - omitted: Defaults to true if enableInstrumentation is true
-	// Note: "auto" is not supported for MCP because it uses custom instrumentation (no standard OTel instrumentor to observe)
+	// MCP enables mcp instrumentation.
+	// Can be: true (platform), false (app), or omitted (defaults to EnableInstrumentation)
+	// Note: "auto" is NOT supported - validation will reject it
+	// Generated field - see operator/api/v1alpha1/agentobservability_types_generated.go
 	MCP interface{} `json:"mcp,omitempty"`
 }
 

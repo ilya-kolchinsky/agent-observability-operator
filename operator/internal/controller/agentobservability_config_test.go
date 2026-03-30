@@ -100,6 +100,68 @@ func TestValidateInstrumentationSpec(t *testing.T) {
 			wantErr: true,
 			errMsg:  "fastapi: true", // Should catch library contradiction first
 		},
+		{
+			name: "invalid: langchain auto - not supported",
+			spec: platformv1alpha1.InstrumentationSpec{
+				LangChain: "auto",
+			},
+			wantErr: true,
+			errMsg:  "langchain: auto is not supported",
+		},
+		{
+			name: "invalid: mcp auto - not supported",
+			spec: platformv1alpha1.InstrumentationSpec{
+				MCP: "auto",
+			},
+			wantErr: true,
+			errMsg:  "mcp: auto is not supported",
+		},
+		{
+			name: "valid: fastapi auto - supported",
+			spec: platformv1alpha1.InstrumentationSpec{
+				FastAPI: "auto",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid: httpx auto - supported",
+			spec: platformv1alpha1.InstrumentationSpec{
+				HTTPX: "auto",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid: requests auto - supported",
+			spec: platformv1alpha1.InstrumentationSpec{
+				Requests: "auto",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid: langchain auto with other valid settings",
+			spec: platformv1alpha1.InstrumentationSpec{
+				EnableInstrumentation: boolPtr(true),
+				FastAPI:               "auto",
+				HTTPX:                 "auto",
+				LangChain:             "auto", // Should fail
+				MCP:                   boolPtr(true),
+			},
+			wantErr: true,
+			errMsg:  "langchain: auto is not supported",
+		},
+		{
+			name: "invalid: mcp auto with other valid settings",
+			spec: platformv1alpha1.InstrumentationSpec{
+				EnableInstrumentation: boolPtr(true),
+				FastAPI:               boolPtr(true),
+				HTTPX:                 "auto",
+				Requests:              "auto",
+				LangChain:             boolPtr(false),
+				MCP:                   "auto", // Should fail
+			},
+			wantErr: true,
+			errMsg:  "mcp: auto is not supported",
+		},
 	}
 
 	for _, tt := range tests {
@@ -315,13 +377,13 @@ func TestResolveInstrumentationSpec(t *testing.T) {
 				t.Errorf("resolveInstrumentationSpec() tracerProvider = %v, want %v",
 					stringPtrValue(got.TracerProvider), tt.wantTracerProvider)
 			}
-			if boolPtrValue(got.FastAPI) != tt.wantFastAPI {
+			if interfaceToBool(got.FastAPI) != tt.wantFastAPI {
 				t.Errorf("resolveInstrumentationSpec() fastapi = %v, want %v",
-					boolPtrValue(got.FastAPI), tt.wantFastAPI)
+					interfaceToBool(got.FastAPI), tt.wantFastAPI)
 			}
-			if boolPtrValue(got.HTTPX) != tt.wantHTTPX {
+			if interfaceToBool(got.HTTPX) != tt.wantHTTPX {
 				t.Errorf("resolveInstrumentationSpec() httpx = %v, want %v",
-					boolPtrValue(got.HTTPX), tt.wantHTTPX)
+					interfaceToBool(got.HTTPX), tt.wantHTTPX)
 			}
 		})
 	}
@@ -338,5 +400,21 @@ func containsSubstring(s, substr string) bool {
 			return true
 		}
 	}
+	return false
+}
+
+// Helper function to convert interface{} field to bool for testing
+// Handles both *bool and "auto" string values
+func interfaceToBool(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+	if boolPtr, ok := value.(*bool); ok {
+		if boolPtr == nil {
+			return false
+		}
+		return *boolPtr
+	}
+	// For "auto" string or other non-bool values, return false for test comparison
 	return false
 }

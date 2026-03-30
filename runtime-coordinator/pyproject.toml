@@ -9,7 +9,11 @@ description = "Runtime coordinator for conflict-aware Python observability boots
 requires-python = ">=3.11"
 
 [tool.setuptools]
-packages = ["agent_obs_runtime"]
+packages = [
+    "agent_obs_runtime",
+    "agent_obs_runtime.plugins",
+    "agent_obs_runtime.plugins.common"
+]
 
 [tool.setuptools.package-dir]
 agent_obs_runtime = "agent_obs_runtime"

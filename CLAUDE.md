@@ -135,29 +135,41 @@ When an `AgentObservabilityDemo` CR is applied:
 6. **Runtime coordinator detects ownership signals** and selects mode
 7. **Runtime coordinator applies fine-grained instrumentation decisions** based on detection results
 
-### Runtime coordinator decision logic
+### Runtime coordinator decision logic (Plugin-Based)
 
-The coordinator makes independent decisions for each instrumentation target:
+The coordinator uses a **plugin architecture** where each instrumentation library is implemented as a plugin.
+Plugins make independent decisions for each instrumentation target:
 
 - **initialize_provider**: Initialize TracerProvider if only ProxyTracerProvider detected
-- **instrument_fastapi**: Instrument FastAPI if available and not already instrumented
-- **instrument_httpx**: Instrument httpx if available and not already instrumented
-- **instrument_requests**: Instrument requests if available and not already instrumented
-- **instrument_langchain**: Instrument LangChain if available and not already instrumented
-- **instrument_mcp**: Instrument MCP boundaries if available and not already instrumented
+- **Per-plugin instrumentation**: Each plugin decides whether to instrument based on config (true/false/"auto")
+  - **Auto-detection plugins** (FastAPI, HTTPX, Requests): Support runtime ownership resolution
+  - **Explicit-only plugins** (LangChain, MCP): Require explicit true/false configuration
 
-### Operator code structure
+### Operator code structure (Plugin-Based)
 
 - `operator/main.go` - operator entrypoint, manager setup
 - `operator/api/v1alpha1/agentobservability_types.go` - CRD API types (AgentObservabilityDemo spec/status)
-- `operator/internal/controller/agentobservability_controller.go` - reconciliation logic
+- `operator/internal/controller/agentobservability_controller.go` - reconciliation logic (plugin-driven)
+- `operator/internal/controller/plugins/` - plugin implementations:
+  - `plugin.go` - InstrumentationPlugin interface
+  - `registry.go` - explicit plugin registry
+  - `{library}.go` - per-library plugins (fastapi, httpx, requests, langchain, mcp)
+  - `common/helpers.go` - shared type checking/conversion utilities
 - `operator/stubs/` - type stubs for k8s and OTel Operator APIs (used instead of full dependencies)
+- `scripts/generate-plugin-fields.sh` - generates CRD fields from plugin registry
 
-### Runtime coordinator structure
+### Runtime coordinator structure (Plugin-Based)
 
-- `runtime-coordinator/agent_obs_runtime/bootstrap.py` - startup orchestration and diagnostics emission
-- `runtime-coordinator/agent_obs_runtime/detection.py` - ownership signal detection and decision functions
-- `runtime-coordinator/agent_obs_runtime/instrumentation.py` - instrumentation actuation for all frameworks
+- `runtime-coordinator/agent_obs_runtime/bootstrap.py` - startup orchestration (plugin-driven)
+- `runtime-coordinator/agent_obs_runtime/instrumentation.py` - TracerProvider initialization only
+- `runtime-coordinator/agent_obs_runtime/plugins/` - plugin implementations:
+  - `base.py` - InstrumentationPlugin abstract base class
+  - `registry.py` - explicit plugin registry
+  - `{library}.py` - per-library plugins (fastapi, httpx, requests, langchain, mcp)
+  - `common/` - shared utilities:
+    - `ownership.py` - OwnershipResolver state machine
+    - `wrapper_utils.py` - thread-local context, diagnostics
+    - `detection_utils.py` - library availability/instrumentation checks
 - `custom-python-image/src/sitecustomize.py` - invokes coordinator at Python startup (replaces OTel operator's sitecustomize.py)
 
 ### Demo app structure
@@ -296,6 +308,19 @@ Edit files in `runtime-coordinator/agent_obs_runtime/`, rebuild custom Python im
 ### Modifying CRD schema
 
 Edit `operator/api/v1alpha1/agentobservability_types.go`, regenerate CRD manifests (if using kubebuilder), update `manifests/crd/agentobservability-crd.yaml`.
+
+### Adding a new instrumentation plugin
+
+The operator uses a **plugin architecture** for extensibility. To add support for a new library:
+
+1. **Implement Python plugin** in `runtime-coordinator/agent_obs_runtime/plugins/{library}.py`
+2. **Implement Go plugin** in `operator/internal/controller/plugins/{library}.go`
+3. **Register plugins** in both `registry.py` and `registry.go`
+4. **Add CRD field** to `operator/api/v1alpha1/agentobservability_types.go`
+5. **Update helper functions** in `agentobservability_controller.go` (getPluginFieldValue/setPluginFieldValue)
+6. **Run generation script**: `scripts/generate-plugin-fields.sh` to update CRD YAML
+
+See **[docs/PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md)** for a complete guide with examples.
 
 ### Testing runtime coordinator changes locally
 

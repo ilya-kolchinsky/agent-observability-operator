@@ -18,6 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	platformv1alpha1 "github.com/example/agent-observability-operator/operator/api/v1alpha1"
+	"github.com/example/agent-observability-operator/operator/internal/controller/plugins"
+	"github.com/example/agent-observability-operator/operator/internal/controller/plugins/common"
 	otelv1alpha1 "github.com/open-telemetry/opentelemetry-operator/apis/v1alpha1"
 )
 
@@ -322,21 +324,21 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 	serviceName := desiredServiceName(demo)
 	collectorEndpoint := collectorEndpointForDemo(demo)
 
-	fastapiVal := fastapiValue(resolvedSpec.FastAPI)
-	httpxVal := httpxValue(resolvedSpec.HTTPX)
-	requestsVal := requestsValue(resolvedSpec.Requests)
-	langchainVal := langchainValue(resolvedSpec.LangChain)
-	mcpVal := mcpValue(resolvedSpec.MCP)
-
 	lines := []string{
-		"# Simplified config-based instrumentation",
+		"# Plugin-based instrumentation configuration",
 		"instrumentation:",
-		fmt.Sprintf("  tracerProvider: %s", yamlStringValue(stringPtrValue(resolvedSpec.TracerProvider))),
-		fmt.Sprintf("  fastapi: %s", fastapiVal),  // Can be "true", "false", or "auto"
-		fmt.Sprintf("  httpx: %s", httpxVal),  // Can be "true", "false", or "auto"
-		fmt.Sprintf("  requests: %s", requestsVal),  // Can be "true", "false", or "auto"
-		fmt.Sprintf("  langchain: %s", langchainVal),  // Can be "true" or "false" (auto rejected by validation)
-		fmt.Sprintf("  mcp: %s", mcpVal),  // Can be "true" or "false" (auto rejected by validation)
+		fmt.Sprintf("  tracerProvider: %s", yamlStringValue(common.StringPtrValue(resolvedSpec.TracerProvider))),
+	}
+
+	// Add plugin fields dynamically
+	for _, plugin := range plugins.InstrumentationPlugins {
+		fieldValue := getPluginFieldValue(resolvedSpec, plugin.Name())
+		strValue := plugin.ValueToString(fieldValue)
+		lines = append(lines, fmt.Sprintf("  %s: %s", plugin.Name(), strValue))
+	}
+
+	// Add telemetry config
+	lines = append(lines,
 		"telemetry:",
 		fmt.Sprintf("  exporterEndpoint: %s", yamlStringValue(collectorEndpoint)),
 		fmt.Sprintf("  tracesEndpoint: %s", yamlStringValue(collectorTracesEndpointForDemo(demo))),
@@ -344,7 +346,7 @@ func renderRuntimeCoordinatorConfig(demo *platformv1alpha1.AgentObservabilityDem
 		fmt.Sprintf("  serviceName: %s", yamlStringValue(serviceName)),
 		fmt.Sprintf("  serviceNamespace: %s", yamlStringValue(namespace)),
 		fmt.Sprintf("  deploymentName: %s", yamlStringValue(demo.Spec.Target.WorkloadName)),
-	}
+	)
 
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -536,20 +538,11 @@ func validateInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) err
 	if spec.EnableInstrumentation != nil && !*spec.EnableInstrumentation {
 		var conflictingFields []string
 
-		if isFastAPITrue(spec.FastAPI) {
-			conflictingFields = append(conflictingFields, "fastapi: true")
-		}
-		if isHTTPXTrue(spec.HTTPX) {
-			conflictingFields = append(conflictingFields, "httpx: true")
-		}
-		if isRequestsTrue(spec.Requests) {
-			conflictingFields = append(conflictingFields, "requests: true")
-		}
-		if isLangChainTrue(spec.LangChain) {
-			conflictingFields = append(conflictingFields, "langchain: true")
-		}
-		if isMCPTrue(spec.MCP) {
-			conflictingFields = append(conflictingFields, "mcp: true")
+		// Iterate over plugins to check for contradictions
+		for _, plugin := range plugins.InstrumentationPlugins {
+			if plugin.IsTrue(getPluginFieldValue(spec, plugin.Name())) {
+				conflictingFields = append(conflictingFields, fmt.Sprintf("%s: true", plugin.Name()))
+			}
 		}
 
 		if len(conflictingFields) > 0 {
@@ -570,24 +563,12 @@ func validateInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) err
 		}
 	}
 
-	// Check for unsupported langchain: auto
-	if isLangChainAuto(spec.LangChain) {
-		return fmt.Errorf(
-			"langchain: auto is not supported. "+
-				"The LangChain instrumentation library does not support fine-grained selective instrumentation, "+
-				"which prevents safe auto-detection when apps partially instrument LangChain components. "+
-				"Use langchain: true (platform instruments everything) or langchain: false (if your app instruments any LangChain components, even partially)",
-		)
-	}
-
-	// Check for unsupported mcp: auto
-	if isMCPAuto(spec.MCP) {
-		return fmt.Errorf(
-			"mcp: auto is not supported. "+
-				"MCP instrumentation uses custom boundary tracing (not a standard OTel instrumentor), "+
-				"so there are no ownership signals to detect. "+
-				"Use mcp: true (platform instruments MCP boundaries) or mcp: false (if your app handles MCP tracing)",
-		)
+	// Iterate over plugins for plugin-specific validation (e.g., rejecting "auto" for some plugins)
+	for _, plugin := range plugins.InstrumentationPlugins {
+		fieldValue := getPluginFieldValue(spec, plugin.Name())
+		if err := plugin.Validate(fieldValue); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -607,17 +588,12 @@ func resolveInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) *pla
 	// Determine default value for library fields based on enableInstrumentation
 	defaultLibValue := enableInstrumentation
 
-	// Apply library field values (use explicit if set, otherwise use default)
-	// FastAPI can be bool or "auto" string
-	resolved.FastAPI = resolveFastAPIField(spec.FastAPI, defaultLibValue)
-	// HTTPX can be bool or "auto" string
-	resolved.HTTPX = resolveHTTPXField(spec.HTTPX, defaultLibValue)
-	// Requests can be bool or "auto" string
-	resolved.Requests = resolveRequestsField(spec.Requests, defaultLibValue)
-	// LangChain can be bool or "auto" string (auto will be rejected by validation)
-	resolved.LangChain = resolveLangChainField(spec.LangChain, defaultLibValue)
-	// MCP can be bool or "auto" string (auto will be rejected by validation)
-	resolved.MCP = resolveMCPField(spec.MCP, defaultLibValue)
+	// Apply library field values using plugins
+	for _, plugin := range plugins.InstrumentationPlugins {
+		fieldValue := getPluginFieldValue(spec, plugin.Name())
+		resolvedValue := plugin.ResolveField(fieldValue, defaultLibValue)
+		setPluginFieldValue(resolved, plugin.Name(), resolvedValue)
+	}
 
 	// Infer tracerProvider if not specified (respects explicit value)
 	if spec.TracerProvider != nil {
@@ -641,12 +617,15 @@ func inferEnableInstrumentation(spec *platformv1alpha1.InstrumentationSpec) bool
 	}
 
 	// Check if any instrumentation settings are specified
-	hasSettings := spec.TracerProvider != nil ||
-		spec.FastAPI != nil ||
-		spec.HTTPX != nil ||
-		spec.Requests != nil ||
-		spec.LangChain != nil ||
-		spec.MCP != nil
+	hasSettings := spec.TracerProvider != nil
+
+	// Check plugin fields
+	for _, plugin := range plugins.InstrumentationPlugins {
+		if getPluginFieldValue(spec, plugin.Name()) != nil {
+			hasSettings = true
+			break
+		}
+	}
 
 	// If settings are specified, implicit opt-in
 	return hasSettings
@@ -659,287 +638,52 @@ func inferEnableInstrumentation(spec *platformv1alpha1.InstrumentationSpec) bool
 // - "auto" is treated as potentially true, so doesn't imply app ownership
 func inferTracerProvider(spec *platformv1alpha1.InstrumentationSpec) string {
 	// If any library is explicitly disabled, the app must have existing instrumentation
-	if isFastAPIFalse(spec.FastAPI) ||
-		isHTTPXFalse(spec.HTTPX) ||
-		isRequestsFalse(spec.Requests) ||
-		isLangChainFalse(spec.LangChain) ||
-		isMCPFalse(spec.MCP) {
-		return "app"
+	for _, plugin := range plugins.InstrumentationPlugins {
+		if plugin.IsFalse(getPluginFieldValue(spec, plugin.Name())) {
+			return "app"
+		}
 	}
 
 	// All libraries enabled (or default), we provide the TracerProvider
 	return "platform"
 }
 
-// isFastAPITrue checks if fastapi field is explicitly true (not "auto", not false, not nil).
-func isFastAPITrue(value interface{}) bool {
-	if value == nil {
-		return false
+// getPluginFieldValue returns the field value for a given plugin name.
+// Returns the interface{} value from InstrumentationSpec based on plugin name.
+func getPluginFieldValue(spec *platformv1alpha1.InstrumentationSpec, pluginName string) interface{} {
+	switch pluginName {
+	case "fastapi":
+		return spec.FastAPI
+	case "httpx":
+		return spec.HTTPX
+	case "requests":
+		return spec.Requests
+	case "langchain":
+		return spec.LangChain
+	case "mcp":
+		return spec.MCP
+	default:
+		return nil
 	}
-
-	// "auto" is not true
-	if _, ok := value.(string); ok {
-		return false  // "auto" doesn't count as true for validation
-	}
-
-	// Check if it's a bool true
-	if boolVal, ok := value.(bool); ok {
-		return boolVal
-	}
-
-	// Check if it's a *bool true
-	if boolPtr, ok := value.(*bool); ok {
-		return *boolPtr
-	}
-
-	return false
 }
 
-// isFastAPIFalse checks if fastapi field is explicitly false (not "auto", not true, not nil).
-func isFastAPIFalse(value interface{}) bool {
-	if value == nil {
-		return false
+// setPluginFieldValue sets the field value for a given plugin name.
+// Sets the interface{} value in InstrumentationSpec based on plugin name.
+func setPluginFieldValue(spec *platformv1alpha1.InstrumentationSpec, pluginName string, value interface{}) {
+	switch pluginName {
+	case "fastapi":
+		spec.FastAPI = value
+	case "httpx":
+		spec.HTTPX = value
+	case "requests":
+		spec.Requests = value
+	case "langchain":
+		spec.LangChain = value
+	case "mcp":
+		spec.MCP = value
 	}
-
-	// "auto" is not false
-	if _, ok := value.(string); ok {
-		return false  // "auto" doesn't count as false for TracerProvider inference
-	}
-
-	// Check if it's a bool false
-	if boolVal, ok := value.(bool); ok {
-		return !boolVal
-	}
-
-	// Check if it's a *bool false
-	if boolPtr, ok := value.(*bool); ok {
-		return !*boolPtr
-	}
-
-	return false
 }
 
-// isHTTPXTrue checks if httpx field is explicitly true (not "auto", not false, not nil).
-func isHTTPXTrue(value interface{}) bool {
-	if value == nil {
-		return false
-	}
-
-	// "auto" is not true
-	if _, ok := value.(string); ok {
-		return false  // "auto" doesn't count as true for validation
-	}
-
-	// Check if it's a bool true
-	if boolVal, ok := value.(bool); ok {
-		return boolVal
-	}
-
-	// Check if it's a *bool true
-	if boolPtr, ok := value.(*bool); ok {
-		return *boolPtr
-	}
-
-	return false
-}
-
-// isHTTPXFalse checks if httpx field is explicitly false (not "auto", not true, not nil).
-func isHTTPXFalse(value interface{}) bool {
-	if value == nil {
-		return false
-	}
-
-	// "auto" is not false
-	if _, ok := value.(string); ok {
-		return false  // "auto" doesn't count as false for TracerProvider inference
-	}
-
-	// Check if it's a bool false
-	if boolVal, ok := value.(bool); ok {
-		return !boolVal
-	}
-
-	// Check if it's a *bool false
-	if boolPtr, ok := value.(*bool); ok {
-		return !*boolPtr
-	}
-
-	return false
-}
-
-// isRequestsTrue checks if requests field is explicitly true (not "auto", not false, not nil).
-func isRequestsTrue(value interface{}) bool {
-	if value == nil {
-		return false
-	}
-
-	// "auto" is not true
-	if _, ok := value.(string); ok {
-		return false  // "auto" doesn't count as true for validation
-	}
-
-	// Check if it's a bool true
-	if boolVal, ok := value.(bool); ok {
-		return boolVal
-	}
-
-	// Check if it's a *bool true
-	if boolPtr, ok := value.(*bool); ok {
-		return *boolPtr
-	}
-
-	return false
-}
-
-// isRequestsFalse checks if requests field is explicitly false (not "auto", not true, not nil).
-func isRequestsFalse(value interface{}) bool {
-	if value == nil {
-		return false
-	}
-
-	// "auto" is not false
-	if _, ok := value.(string); ok {
-		return false  // "auto" doesn't count as false for TracerProvider inference
-	}
-
-	// Check if it's a bool false
-	if boolVal, ok := value.(bool); ok {
-		return !boolVal
-	}
-
-	// Check if it's a *bool false
-	if boolPtr, ok := value.(*bool); ok {
-		return !*boolPtr
-	}
-
-	return false
-}
-
-// isLangChainTrue checks if langchain field is explicitly true (not "auto", not false, not nil).
-func isLangChainTrue(value interface{}) bool {
-	if value == nil {
-		return false
-	}
-
-	// "auto" is not true
-	if _, ok := value.(string); ok {
-		return false  // "auto" doesn't count as true for validation
-	}
-
-	// Check if it's a bool true
-	if boolVal, ok := value.(bool); ok {
-		return boolVal
-	}
-
-	// Check if it's a *bool true
-	if boolPtr, ok := value.(*bool); ok {
-		return *boolPtr
-	}
-
-	return false
-}
-
-// isLangChainFalse checks if langchain field is explicitly false (not "auto", not true, not nil).
-func isLangChainFalse(value interface{}) bool {
-	if value == nil {
-		return false
-	}
-
-	// "auto" is not false
-	if _, ok := value.(string); ok {
-		return false  // "auto" doesn't count as false for TracerProvider inference
-	}
-
-	// Check if it's a bool false
-	if boolVal, ok := value.(bool); ok {
-		return !boolVal
-	}
-
-	// Check if it's a *bool false
-	if boolPtr, ok := value.(*bool); ok {
-		return !*boolPtr
-	}
-
-	return false
-}
-
-// isLangChainAuto checks if langchain field is "auto" (not supported, will be rejected).
-func isLangChainAuto(value interface{}) bool {
-	if value == nil {
-		return false
-	}
-
-	// Check if it's the string "auto"
-	if strVal, ok := value.(string); ok {
-		return strVal == "auto"
-	}
-
-	return false
-}
-
-// isMCPTrue checks if mcp field is explicitly true (not "auto", not false, not nil).
-func isMCPTrue(value interface{}) bool {
-	if value == nil {
-		return false
-	}
-
-	// "auto" is not true
-	if _, ok := value.(string); ok {
-		return false  // "auto" doesn't count as true for validation
-	}
-
-	// Check if it's a bool true
-	if boolVal, ok := value.(bool); ok {
-		return boolVal
-	}
-
-	// Check if it's a *bool true
-	if boolPtr, ok := value.(*bool); ok {
-		return *boolPtr
-	}
-
-	return false
-}
-
-// isMCPFalse checks if mcp field is explicitly false (not "auto", not true, not nil).
-func isMCPFalse(value interface{}) bool {
-	if value == nil {
-		return false
-	}
-
-	// "auto" is not false
-	if _, ok := value.(string); ok {
-		return false  // "auto" doesn't count as false for TracerProvider inference
-	}
-
-	// Check if it's a bool false
-	if boolVal, ok := value.(bool); ok {
-		return !boolVal
-	}
-
-	// Check if it's a *bool false
-	if boolPtr, ok := value.(*bool); ok {
-		return !*boolPtr
-	}
-
-	return false
-}
-
-// isMCPAuto checks if mcp field is "auto" (not supported, will be rejected).
-func isMCPAuto(value interface{}) bool {
-	if value == nil {
-		return false
-	}
-
-	// Check if it's the string "auto"
-	if strVal, ok := value.(string); ok {
-		return strVal == "auto"
-	}
-
-	return false
-}
-
-// boolPtrOrDefault returns the value if not nil, otherwise returns the default.
 func boolPtrOrDefault(ptr *bool, defaultVal bool) *bool {
 	if ptr != nil {
 		return ptr
@@ -961,295 +705,6 @@ func stringPtrValue(ptr *string) string {
 		return *ptr
 	}
 	return ""
-}
-
-// resolveFastAPIField handles the fastapi field which can be bool or "auto" string.
-func resolveFastAPIField(value interface{}, defaultBool bool) interface{} {
-	if value == nil {
-		// Not specified - use default bool value
-		return &defaultBool
-	}
-
-	// Check if it's a string "auto"
-	if strVal, ok := value.(string); ok {
-		return strVal
-	}
-
-	// Check if it's a bool
-	if boolVal, ok := value.(bool); ok {
-		return &boolVal
-	}
-
-	// Check if it's a *bool
-	if boolPtr, ok := value.(*bool); ok {
-		return boolPtr
-	}
-
-	// Fallback to default
-	return &defaultBool
-}
-
-// resolveHTTPXField handles the httpx field which can be bool or "auto" string.
-func resolveHTTPXField(value interface{}, defaultBool bool) interface{} {
-	if value == nil {
-		// Not specified - use default bool value
-		return &defaultBool
-	}
-
-	// Check if it's a string "auto"
-	if strVal, ok := value.(string); ok {
-		return strVal
-	}
-
-	// Check if it's a bool
-	if boolVal, ok := value.(bool); ok {
-		return &boolVal
-	}
-
-	// Check if it's a *bool
-	if boolPtr, ok := value.(*bool); ok {
-		return boolPtr
-	}
-
-	// Fallback to default
-	return &defaultBool
-}
-
-// httpxValue extracts the value from httpx field for config rendering.
-// Returns either "true", "false", or "auto" as a string for YAML rendering.
-func httpxValue(value interface{}) string {
-	if value == nil {
-		return "false"
-	}
-
-	// Check if it's the string "auto"
-	if strVal, ok := value.(string); ok {
-		return strVal
-	}
-
-	// Check if it's a bool
-	if boolVal, ok := value.(bool); ok {
-		if boolVal {
-			return "true"
-		}
-		return "false"
-	}
-
-	// Check if it's a *bool
-	if boolPtr, ok := value.(*bool); ok {
-		if *boolPtr {
-			return "true"
-		}
-		return "false"
-	}
-
-	return "false"
-}
-
-// fastapiValue extracts the value from fastapi field for config rendering.
-// Returns either "true", "false", or "auto" as a string for YAML rendering.
-func fastapiValue(value interface{}) string {
-	if value == nil {
-		return "false"
-	}
-
-	// Check if it's the string "auto"
-	if strVal, ok := value.(string); ok {
-		return strVal
-	}
-
-	// Check if it's a bool
-	if boolVal, ok := value.(bool); ok {
-		if boolVal {
-			return "true"
-		}
-		return "false"
-	}
-
-	// Check if it's a *bool
-	if boolPtr, ok := value.(*bool); ok {
-		if *boolPtr {
-			return "true"
-		}
-		return "false"
-	}
-
-	return "false"
-}
-
-// resolveRequestsField handles the requests field which can be bool or "auto" string.
-func resolveRequestsField(value interface{}, defaultBool bool) interface{} {
-	if value == nil {
-		// Not specified - use default bool value
-		return &defaultBool
-	}
-
-	// Check if it's a string "auto"
-	if strVal, ok := value.(string); ok {
-		return strVal
-	}
-
-	// Check if it's a bool
-	if boolVal, ok := value.(bool); ok {
-		return &boolVal
-	}
-
-	// Check if it's a *bool
-	if boolPtr, ok := value.(*bool); ok {
-		return boolPtr
-	}
-
-	// Fallback to default
-	return &defaultBool
-}
-
-// requestsValue extracts the value from requests field for config rendering.
-// Returns either "true", "false", or "auto" as a string for YAML rendering.
-func requestsValue(value interface{}) string {
-	if value == nil {
-		return "false"
-	}
-
-	// Check if it's the string "auto"
-	if strVal, ok := value.(string); ok {
-		return strVal
-	}
-
-	// Check if it's a bool
-	if boolVal, ok := value.(bool); ok {
-		if boolVal {
-			return "true"
-		}
-		return "false"
-	}
-
-	// Check if it's a *bool
-	if boolPtr, ok := value.(*bool); ok {
-		if *boolPtr {
-			return "true"
-		}
-		return "false"
-	}
-
-	return "false"
-}
-
-// resolveLangChainField handles the langchain field which can be bool or "auto" string.
-// Note: "auto" will be rejected during validation, but we handle it here for consistency.
-func resolveLangChainField(value interface{}, defaultBool bool) interface{} {
-	if value == nil {
-		// Not specified - use default bool value
-		return &defaultBool
-	}
-
-	// Check if it's a string "auto" (will be rejected by validation)
-	if strVal, ok := value.(string); ok {
-		return strVal
-	}
-
-	// Check if it's a bool
-	if boolVal, ok := value.(bool); ok {
-		return &boolVal
-	}
-
-	// Check if it's a *bool
-	if boolPtr, ok := value.(*bool); ok {
-		return boolPtr
-	}
-
-	// Fallback to default
-	return &defaultBool
-}
-
-// langchainValue extracts the value from langchain field for config rendering.
-// Returns either "true", "false", or "auto" as a string for YAML rendering.
-// Note: "auto" will be rejected during validation, but we handle it here for consistency.
-func langchainValue(value interface{}) string {
-	if value == nil {
-		return "false"
-	}
-
-	// Check if it's the string "auto" (will be rejected by validation)
-	if strVal, ok := value.(string); ok {
-		return strVal
-	}
-
-	// Check if it's a bool
-	if boolVal, ok := value.(bool); ok {
-		if boolVal {
-			return "true"
-		}
-		return "false"
-	}
-
-	// Check if it's a *bool
-	if boolPtr, ok := value.(*bool); ok {
-		if *boolPtr {
-			return "true"
-		}
-		return "false"
-	}
-
-	return "false"
-}
-
-// resolveMCPField handles the mcp field which can be bool or "auto" string.
-// Note: "auto" will be rejected during validation, but we handle it here for consistency.
-func resolveMCPField(value interface{}, defaultBool bool) interface{} {
-	if value == nil {
-		// Not specified - use default bool value
-		return &defaultBool
-	}
-
-	// Check if it's a string "auto" (will be rejected by validation)
-	if strVal, ok := value.(string); ok {
-		return strVal
-	}
-
-	// Check if it's a bool
-	if boolVal, ok := value.(bool); ok {
-		return &boolVal
-	}
-
-	// Check if it's a *bool
-	if boolPtr, ok := value.(*bool); ok {
-		return boolPtr
-	}
-
-	// Fallback to default
-	return &defaultBool
-}
-
-// mcpValue extracts the value from mcp field for config rendering.
-// Returns either "true", "false", or "auto" as a string for YAML rendering.
-// Note: "auto" will be rejected during validation, but we handle it here for consistency.
-func mcpValue(value interface{}) string {
-	if value == nil {
-		return "false"
-	}
-
-	// Check if it's the string "auto" (will be rejected by validation)
-	if strVal, ok := value.(string); ok {
-		return strVal
-	}
-
-	// Check if it's a bool
-	if boolVal, ok := value.(bool); ok {
-		if boolVal {
-			return "true"
-		}
-		return "false"
-	}
-
-	// Check if it's a *bool
-	if boolPtr, ok := value.(*bool); ok {
-		if *boolPtr {
-			return "true"
-		}
-		return "false"
-	}
-
-	return "false"
 }
 
 // SetupWithManager wires the controller into the manager.

@@ -5,6 +5,8 @@ through a state machine:
 - UNDECIDED: Initial state, ownership not yet determined
 - PLATFORM: Platform owns this target (coordinator instruments)
 - APP: App owns this target (app instruments, coordinator skips)
+
+This is shared infrastructure used by auto-detection plugins.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from typing import Dict, Optional
+    from typing import Dict, List, Optional
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,16 +36,31 @@ class OwnershipResolver:
     2. Observes app claims during startup (UNDECIDED → APP)
     3. Observes platform activation attempts (UNDECIDED → PLATFORM)
     4. Freezes remaining UNDECIDED → PLATFORM before first workload
+
+    Usage:
+        # During bootstrap
+        resolver = OwnershipResolver(config, supported_auto_libraries=["httpx", "fastapi"])
+
+        # During wrapper callbacks
+        if resolver.observe_app_claim("httpx"):
+            # App is allowed to instrument
+            pass
+
+        if resolver.observe_platform_activation("httpx"):
+            # Platform should instrument
+            pass
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, supported_auto_libraries: List[str]):
+        """Initialize ownership resolver.
+
+        Args:
+            config: Full coordinator config dict
+            supported_auto_libraries: List of library names that support auto-detection
+        """
         self.config = config
         self.instrumentation_config = config.get("instrumentation", {})
-
-        # List of libraries that support auto-detection
-        self.supported_auto_libraries = ["httpx", "requests", "fastapi"]
-        # Future: add more libraries here
-        # ["langchain"]
+        self.supported_auto_libraries = supported_auto_libraries
 
         # Only track state for libraries configured with "auto"
         self.states: Dict[str, OwnershipState] = {}
@@ -134,15 +151,30 @@ class OwnershipResolver:
 _resolver: Optional[OwnershipResolver] = None
 
 
-def initialize_resolver(config: dict) -> OwnershipResolver:
-    """Initialize the global ownership resolver."""
+def initialize_resolver(config: dict, supported_auto_libraries: List[str]) -> OwnershipResolver:
+    """Initialize the global ownership resolver.
+
+    Args:
+        config: Full coordinator config dict
+        supported_auto_libraries: List of library names that support auto-detection
+
+    Returns:
+        The initialized OwnershipResolver instance
+    """
     global _resolver
-    _resolver = OwnershipResolver(config)
+    _resolver = OwnershipResolver(config, supported_auto_libraries)
     return _resolver
 
 
 def get_resolver() -> OwnershipResolver:
-    """Get the global ownership resolver."""
+    """Get the global ownership resolver.
+
+    Raises:
+        RuntimeError: If resolver not initialized
+
+    Returns:
+        The global OwnershipResolver instance
+    """
     if _resolver is None:
         raise RuntimeError("OwnershipResolver not initialized - call initialize_resolver() first")
     return _resolver
