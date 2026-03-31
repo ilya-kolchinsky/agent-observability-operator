@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Literal
 
 from fastapi import FastAPI
@@ -11,6 +12,7 @@ from langchain.agents import AgentExecutor, create_react_agent
 from langchain.prompts import PromptTemplate
 from langchain_community.chat_models import ChatOllama
 from langchain_core.tools import Tool
+from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from common.logging_config import configure_logging, install_request_logging
@@ -56,6 +58,15 @@ class DemoLangchainAgent:
             temperature=0.0,  # Deterministic for reliable tool calling
             num_predict=256,  # Limit output length to prevent hallucination
         )
+
+        # Initialize OpenAI client pointing to Ollama's OpenAI-compatible endpoint
+        # This is used for LLM-as-a-judge validation of the agent's answers
+        openai_base_url = config.llm_base_url.rstrip('/') + '/v1'
+        self._openai_client = OpenAI(
+            base_url=openai_base_url,
+            api_key="dummy",  # Ollama doesn't require a real key
+        )
+        self._logger.info("openai_client_initialized base_url=%s", openai_base_url)
 
         # Create MCP tools
         self._tools = self._create_mcp_tools()
@@ -153,6 +164,57 @@ Thought:{agent_scratchpad}""")
             ),
         ]
 
+    def _validate_answer(self, query: str, answer: str) -> dict[str, Any]:
+        """Use OpenAI SDK (LLM-as-a-judge) to validate the agent's answer.
+
+        This demonstrates a realistic production pattern where one LLM validates
+        another's output for coherence, relevance, and correctness.
+        """
+        self._logger.info("validation_start query=%s", query[:50])
+
+        try:
+            validation_prompt = f"""You are a judge evaluating an AI agent's answer.
+
+Question: {query}
+Answer: {answer}
+
+Evaluate this answer on:
+1. Coherence: Does it make sense?
+2. Relevance: Does it address the question?
+3. Completeness: Does it provide useful information?
+
+Rate from 1-5 (5 is best) and provide a brief explanation.
+Format: "Rating: X/5 - explanation"
+"""
+
+            response = self._openai_client.chat.completions.create(
+                model=self._config.llm_model,
+                messages=[{"role": "user", "content": validation_prompt}],
+                temperature=0.0,
+                max_tokens=100,
+            )
+
+            judgment = response.choices[0].message.content.strip()
+
+            # Extract rating from judgment (simple regex)
+            rating_match = re.search(r'Rating:\s*(\d)', judgment)
+            rating = int(rating_match.group(1)) if rating_match else 3
+
+            self._logger.info("validation_end rating=%d judgment=%s", rating, judgment[:100])
+
+            return {
+                "rating": rating,
+                "judgment": judgment,
+                "passed": rating >= 3,
+            }
+        except Exception as e:
+            self._logger.error("validation_error error=%s", str(e))
+            return {
+                "rating": 0,
+                "judgment": f"Validation failed: {str(e)}",
+                "passed": False,
+            }
+
     def run(self, request: AgentRequest) -> dict[str, Any]:
         """Execute the agent with LLM guidance and tool calls."""
         self._logger.info("agent_run_start scenario=%s prompt=%s", self._config.scenario, request.prompt)
@@ -185,12 +247,21 @@ Thought:{agent_scratchpad}""")
             final_response = self._llm.invoke([HumanMessage(content=format_prompt)])
             output = final_response.content.strip()
 
-            self._logger.info("agent_run_end scenario=%s output=%s", self._config.scenario, output)
+            # Step 4: Validate answer using OpenAI SDK (LLM-as-a-judge)
+            validation = self._validate_answer(request.prompt, output)
+
+            self._logger.info(
+                "agent_run_end scenario=%s output=%s validation_rating=%d",
+                self._config.scenario,
+                output,
+                validation.get("rating", 0),
+            )
 
             return {
                 "input": request.prompt,
                 "output": output,
                 "intermediate_steps": 2,  # location extraction + weather call
+                "validation": validation,
             }
         except Exception as e:
             self._logger.error("agent_run_error scenario=%s error=%s", self._config.scenario, str(e))

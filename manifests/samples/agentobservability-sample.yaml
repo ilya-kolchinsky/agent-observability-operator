@@ -21,6 +21,7 @@ spec:
     requests: true            # Platform instruments requests
     langchain: true           # Platform instruments LangChain
     mcp: true                 # Platform instruments MCP
+    openai: true              # Platform instruments OpenAI SDK
 ---
 # Sample 2: PARTIAL EXISTING tracing - Mixed ownership
 # Demo: App initializes TracerProvider and handles some instrumentation, platform handles the rest
@@ -45,6 +46,7 @@ spec:
     requests: true            # Platform handles requests
     langchain: false          # App instruments LangChain in main.py
     mcp: true                 # Platform handles MCP
+    openai: true              # Platform handles OpenAI SDK
 ---
 # Sample 3: FULL EXISTING tracing - App owns EVERYTHING
 # Demo: App has complete tracing setup, platform stays out of the way
@@ -69,6 +71,7 @@ spec:
     requests: false
     langchain: false
     mcp: false
+    openai: false                 # App instruments OpenAI SDK in main.py
 ---
 # Sample 4: AUTO-DETECTION - Runtime ownership resolution for httpx
 # Demo: App instruments httpx, platform auto-detects and grants ownership
@@ -93,3 +96,4 @@ spec:
     requests: auto                # AUTO-DETECTION: App neither instruments nor uses → UNDECIDED → not instrumented
     langchain: false              # App instruments LangChain in main.py
     mcp: true                     # Platform handles MCP
+    openai: auto                  # AUTO-DETECTION: App uses OpenAI() → platform detects → platform owns
