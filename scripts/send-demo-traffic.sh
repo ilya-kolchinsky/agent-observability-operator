@@ -9,7 +9,7 @@ kubectl run "${RUNNER_NAME}" \
   --namespace demo-apps \
   --image "${RUNNER_IMAGE}" \
   --command -- sh -ceu '
-services="agent-no-existing agent-partial-existing agent-full-existing agent-auto-httpx"
+services="agent-no-existing agent-partial-existing agent-full-existing"
 for service in ${services}; do
   echo "==> Sending demo traffic to ${service}"
   curl -fsS "http://${service}.demo-apps.svc.cluster.local:8000/healthz"
@@ -30,7 +30,6 @@ Verification hints:
     kubectl logs -n demo-apps deployment/agent-no-existing --tail=100
     kubectl logs -n demo-apps deployment/agent-partial-existing --tail=100
     kubectl logs -n demo-apps deployment/agent-full-existing --tail=100
-    kubectl logs -n demo-apps deployment/agent-auto-httpx --tail=100
 - Collector received OTLP and exported to Jaeger:
     kubectl logs -n observability deployment/demo-collector-collector --tail=200
 - Jaeger should now show traces after port-forwarding:

@@ -563,6 +563,34 @@ func validateInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) err
 		}
 	}
 
+	// Check for contradiction: autoDetection: true with explicit values for auto-capable libraries
+	if spec.AutoDetection != nil && *spec.AutoDetection {
+		var conflictingFields []string
+
+		for _, plugin := range plugins.InstrumentationPlugins {
+			if !plugin.SupportsAutoDetection() {
+				continue // Skip libraries that don't support auto-detection
+			}
+
+			fieldValue := getPluginFieldValue(spec, plugin.Name())
+			if fieldValue != nil {
+				// Explicit value provided for auto-capable library
+				valueStr := plugin.ValueToString(fieldValue)
+				conflictingFields = append(conflictingFields, fmt.Sprintf("%s: %s", plugin.Name(), valueStr))
+			}
+		}
+
+		if len(conflictingFields) > 0 {
+			return fmt.Errorf(
+				"autoDetection is true but the following auto-capable libraries have explicit values: %s. "+
+					"When autoDetection is enabled, libraries supporting auto-detection (FastAPI, HTTPX, Requests, OpenAI) "+
+					"automatically use 'auto' mode and should not have explicit values. "+
+					"Either disable autoDetection or remove these explicit library settings",
+				strings.Join(conflictingFields, ", "),
+			)
+		}
+	}
+
 	// Iterate over plugins for plugin-specific validation (e.g., rejecting "auto" for some plugins)
 	for _, plugin := range plugins.InstrumentationPlugins {
 		fieldValue := getPluginFieldValue(spec, plugin.Name())

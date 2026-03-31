@@ -23,8 +23,8 @@ spec:
     mcp: true                 # Platform instruments MCP
     openai: true              # Platform instruments OpenAI SDK
 ---
-# Sample 2: PARTIAL EXISTING tracing - Mixed ownership
-# Demo: App initializes TracerProvider and handles some instrumentation, platform handles the rest
+# Sample 2: AUTO-DETECTION - Demonstrates autoDetection with selective app ownership
+# Demo: autoDetection handles most libraries, app explicitly owns LangChain
 apiVersion: platform.example.com/v1alpha1
 kind: AgentObservabilityDemo
 metadata:
@@ -39,14 +39,11 @@ spec:
   instrumentation:
     customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
     otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
-    enableInstrumentation: true
-    tracerProvider: app       # App owns provider (inferred from fastapi: false)
-    fastapi: false            # App instruments FastAPI in main.py
-    httpx: true               # Platform handles httpx
-    requests: true            # Platform handles requests
-    langchain: false          # App instruments LangChain in main.py
-    mcp: true                 # Platform handles MCP
-    openai: true              # Platform handles OpenAI SDK
+    autoDetection: true       # Enable auto-detection for all supported libraries
+    langchain: false          # Override: App instruments LangChain explicitly in main.py
+    mcp: true                 # Override: Platform handles MCP (no auto-detection support)
+    # FastAPI, HTTPX, Requests, OpenAI automatically get "auto" via autoDetection
+    # Platform auto-detects ownership based on app's usage patterns
 ---
 # Sample 3: FULL EXISTING tracing - App owns EVERYTHING
 # Demo: App has complete tracing setup, platform stays out of the way
@@ -72,28 +69,3 @@ spec:
     langchain: false
     mcp: false
     openai: false                 # App instruments OpenAI SDK in main.py
----
-# Sample 4: AUTO-DETECTION - Demonstrates autoDetection feature
-# Demo: Single setting enables auto-detection for all supported libraries
-apiVersion: platform.example.com/v1alpha1
-kind: AgentObservabilityDemo
-metadata:
-  name: auto-httpx
-  namespace: demo-apps
-spec:
-  target:
-    namespace: demo-apps
-    workloadName: agent-auto-httpx
-    workloadKind: Deployment
-    containerName: app
-  instrumentation:
-    customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
-    otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
-    autoDetection: true           # ENABLES AUTO-DETECTION for all supported libraries (FastAPI, HTTPX, Requests, OpenAI)
-    langchain: false              # Explicit override: App instruments LangChain in main.py
-    mcp: true                     # Explicit override: Platform handles MCP (no auto-detection support)
-    # Note: FastAPI, HTTPX, Requests, OpenAI automatically get "auto" via autoDetection
-    # - FastAPI: App uses FastAPI() → platform detects → platform owns
-    # - HTTPX: App instruments → wrapper observes → app owns
-    # - Requests: App neither instruments nor uses → UNDECIDED → not instrumented
-    # - OpenAI: App uses OpenAI() → platform detects → platform owns

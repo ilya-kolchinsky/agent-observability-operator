@@ -162,6 +162,54 @@ func TestValidateInstrumentationSpec(t *testing.T) {
 			wantErr: true,
 			errMsg:  "mcp: auto is not supported",
 		},
+		{
+			name: "valid: autoDetection true with only non-auto libs specified",
+			spec: platformv1alpha1.InstrumentationSpec{
+				AutoDetection: boolPtr(true),
+				LangChain:     boolPtr(false),
+				MCP:           boolPtr(true),
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid: autoDetection true with fastapi true",
+			spec: platformv1alpha1.InstrumentationSpec{
+				AutoDetection: boolPtr(true),
+				FastAPI:       boolPtr(true),
+			},
+			wantErr: true,
+			errMsg:  "autoDetection is true but the following auto-capable libraries have explicit values: fastapi: true",
+		},
+		{
+			name: "invalid: autoDetection true with httpx false",
+			spec: platformv1alpha1.InstrumentationSpec{
+				AutoDetection: boolPtr(true),
+				HTTPX:         boolPtr(false),
+			},
+			wantErr: true,
+			errMsg:  "autoDetection is true but the following auto-capable libraries have explicit values: httpx: false",
+		},
+		{
+			name: "invalid: autoDetection true with requests auto",
+			spec: platformv1alpha1.InstrumentationSpec{
+				AutoDetection: boolPtr(true),
+				Requests:      "auto",
+			},
+			wantErr: true,
+			errMsg:  "autoDetection is true but the following auto-capable libraries have explicit values: requests: auto",
+		},
+		{
+			name: "invalid: autoDetection true with multiple auto-capable libs specified",
+			spec: platformv1alpha1.InstrumentationSpec{
+				AutoDetection: boolPtr(true),
+				FastAPI:       boolPtr(true),
+				HTTPX:         "auto",
+				OpenAI:        boolPtr(false),
+				LangChain:     boolPtr(false), // OK - doesn't support auto
+			},
+			wantErr: true,
+			errMsg:  "autoDetection is true but the following auto-capable libraries have explicit values",
+		},
 	}
 
 	for _, tt := range tests {

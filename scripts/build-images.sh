@@ -22,7 +22,6 @@ build_image custom-python-autoinstrumentation custom-python-image/Dockerfile
 build_image demo-agent-no-existing demo-apps/agent-no-existing/Dockerfile
 build_image demo-agent-partial-existing demo-apps/agent-partial-existing/Dockerfile
 build_image demo-agent-full-existing demo-apps/agent-full-existing/Dockerfile
-build_image demo-agent-auto-httpx demo-apps/agent-auto-httpx/Dockerfile
 build_image mcp-server demo-apps/mcp-server/Dockerfile
 
 echo "Built all local PoC images successfully."

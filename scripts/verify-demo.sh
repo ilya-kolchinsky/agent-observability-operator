@@ -47,7 +47,7 @@ require_grep \
   kubectl logs -n "${OPERATOR_NAMESPACE}" deployment/agent-observability-operator --tail=400
 
 log_step "Checking mutated workload pods"
-for workload in agent-no-existing agent-partial-existing agent-full-existing agent-auto-httpx; do
+for workload in agent-no-existing agent-partial-existing agent-full-existing; do
   pod=$(kubectl get pods -n "${DEMO_NAMESPACE}" -l "app.kubernetes.io/name=${workload}" -o jsonpath='{.items[0].metadata.name}')
   if [[ -z "${pod}" ]]; then
     echo "FAIL: could not find Pod for ${workload}" >&2
@@ -130,11 +130,9 @@ check_config_decision() {
 
 # Format: workload initialize_provider fastapi httpx requests langchain mcp
 check_config_decision agent-no-existing true true true true true true
-check_config_decision agent-partial-existing false false true true false true
+# agent-partial-existing: autoDetection enabled, so fastapi/httpx/requests/openai deferred (false at bootstrap)
+check_config_decision agent-partial-existing false false false false false true
 check_config_decision agent-full-existing false false false false false false
-# agent-auto-httpx: fastapi, httpx, and requests are all "auto" (deferred to runtime wrappers)
-# Bootstrap decisions show false for all three (instrumentation deferred)
-check_config_decision agent-auto-httpx false false false false false true
 
 log_step "Checking collector and Jaeger are reachable inside the cluster"
 require_resource "Collector deployment is available" kubectl get deployment demo-collector-collector -n "${OBS_NAMESPACE}"
