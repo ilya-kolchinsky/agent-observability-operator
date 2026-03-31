@@ -1,4 +1,4 @@
-.PHONY: create-kind-cluster build-images load-images-kind install-deps install-otel-operator install-collector install-jaeger deploy-operator deploy-demo-apps apply-sample-crs deploy verify-demo port-forward-jaeger send-demo-traffic demo-walkthrough demo operator-check-local clean
+.PHONY: create-kind-cluster build-images load-images-kind install-deps setup-ollama install-otel-operator install-collector install-jaeger deploy-operator deploy-demo-apps apply-sample-crs deploy verify-demo port-forward-jaeger send-demo-traffic demo-walkthrough demo operator-check-local clean
 
 create-kind-cluster:
 	./scripts/create-kind-cluster.sh
@@ -11,6 +11,9 @@ load-images-kind:
 
 install-deps:
 	./scripts/install-deps.sh
+
+setup-ollama:
+	./scripts/setup-ollama.sh
 
 install-otel-operator:
 	./scripts/install-otel-operator.sh

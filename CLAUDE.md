@@ -51,9 +51,10 @@ python -m pytest tests/
 
 ### Ollama LLM (required for demo agents)
 
-The demo agents use Ollama running locally on your host machine for better performance. This is required before running the demo.
+The demo agents use Ollama running locally on your host machine for better performance.
 
-**Install Ollama:**
+**Installation:**
+Ollama must be installed before running the demo. Install it via:
 ```bash
 # macOS
 brew install ollama
@@ -64,13 +65,15 @@ curl -fsSL https://ollama.com/install.sh | sh
 # Or download from https://ollama.com/download
 ```
 
-**Start Ollama and pull the model:**
-```bash
-# Start Ollama server (keep running in a separate terminal)
-ollama serve
+**Automated Setup:**
+The demo automatically checks if Ollama is running and if the required model (phi) is available.
+If not, it will:
+- Start the Ollama service automatically
+- Download the phi model if needed
 
-# In another terminal, pull the phi model
-ollama pull phi
+You can also manually run the setup:
+```bash
+make setup-ollama
 ```
 
 The demo agents connect to Ollama at `http://host.docker.internal:11434` (which kind automatically maps to your host machine).
@@ -402,11 +405,9 @@ curl http://localhost:11434/api/tags
 kubectl logs -n demo-apps deployment/agent-no-existing --tail=50
 ```
 
-If Ollama is not running:
+If Ollama is not running or model is missing, run the setup script:
 ```bash
-# Start Ollama server
-ollama serve
-
-# Pull the phi model (in another terminal)
-ollama pull phi
+make setup-ollama
 ```
+
+This will automatically start Ollama and download the phi model if needed.

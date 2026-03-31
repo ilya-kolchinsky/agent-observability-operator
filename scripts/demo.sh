@@ -22,6 +22,9 @@ step '4. Load images into kind'
 step '5. Deploy the custom operator'
 "${SCRIPT_DIR}/deploy-operator.sh"
 
+step '5b. Setup Ollama (LLM for demo agents)'
+"${SCRIPT_DIR}/setup-ollama.sh"
+
 step '6. Deploy demo app variants'
 "${SCRIPT_DIR}/deploy-demo-apps.sh"
 
