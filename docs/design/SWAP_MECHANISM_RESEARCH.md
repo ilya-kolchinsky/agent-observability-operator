@@ -271,7 +271,7 @@ Once coordinator initializes TracerProvider in sitecustomize, app cannot overrid
 **Add configuration option to declare provider ownership BEFORE coordinator runs:**
 
 ```yaml
-# In AgentObservabilityDemo CR
+# In AutoInstrumentation CR
 spec:
   runtimeCoordinator:
     instrumentationOwnership:

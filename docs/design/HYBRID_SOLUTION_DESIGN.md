@@ -46,11 +46,11 @@ This design combines explicit configuration (for predictable behavior) with ligh
 
 ### 1.1 CRD Schema Extension
 
-Add instrumentation ownership configuration to AgentObservabilityDemo:
+Add instrumentation ownership configuration to AutoInstrumentation:
 
 ```yaml
 apiVersion: platform.example.com/v1alpha1
-kind: AgentObservabilityDemo
+kind: AutoInstrumentation
 metadata:
   name: my-agent
   namespace: demo-apps
@@ -107,7 +107,7 @@ spec:
 
 **Operator side** (`operator/internal/controller/agentobservability_controller.go`):
 ```go
-func buildRuntimeCoordinatorConfig(demo *AgentObservabilityDemo) map[string]interface{} {
+func buildRuntimeCoordinatorConfig(demo *AutoInstrumentation) map[string]interface{} {
     config := map[string]interface{}{
         "enabled": demo.Spec.RuntimeCoordinator.Enabled,
         "instrumentationOwnership": map[string]string{
@@ -1208,7 +1208,7 @@ def bootstrap(config: dict[str, Any] | None = None) -> None:
 ```yaml
 # No ownership config - all "auto"
 apiVersion: platform.example.com/v1alpha1
-kind: AgentObservabilityDemo
+kind: AutoInstrumentation
 metadata:
   name: simple-agent
 spec:
@@ -1231,7 +1231,7 @@ spec:
 
 ```yaml
 apiVersion: platform.example.com/v1alpha1
-kind: AgentObservabilityDemo
+kind: AutoInstrumentation
 metadata:
   name: custom-config-agent
 spec:
@@ -1280,7 +1280,7 @@ trace.set_tracer_provider(provider)
 
 ```yaml
 apiVersion: platform.example.com/v1alpha1
-kind: AgentObservabilityDemo
+kind: AutoInstrumentation
 metadata:
   name: app-owned-provider
 spec:
@@ -1314,7 +1314,7 @@ spec:
 
 ```yaml
 apiVersion: platform.example.com/v1alpha1
-kind: AgentObservabilityDemo
+kind: AutoInstrumentation
 metadata:
   name: partial-control-agent
 spec:
