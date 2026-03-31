@@ -389,6 +389,119 @@ func TestResolveInstrumentationSpec(t *testing.T) {
 	}
 }
 
+func TestResolveInstrumentationSpecWithAutoDetection(t *testing.T) {
+	tests := []struct {
+		name                     string
+		spec                     platformv1alpha1.InstrumentationSpec
+		wantEnableInstrumentation bool
+		wantFastAPI              interface{} // Can be bool or "auto"
+		wantHTTPX                interface{}
+		wantLangChain            interface{}
+		wantMCP                  interface{}
+	}{
+		{
+			name: "autoDetection true - auto-capable libs get auto",
+			spec: platformv1alpha1.InstrumentationSpec{
+				AutoDetection: boolPtr(true),
+			},
+			wantEnableInstrumentation: true,
+			wantFastAPI:               "auto", // Auto-capable
+			wantHTTPX:                 "auto", // Auto-capable
+			wantLangChain:             boolPtr(true), // Not auto-capable, uses enableInstrumentation default
+			wantMCP:                   boolPtr(true), // Not auto-capable, uses enableInstrumentation default
+		},
+		{
+			name: "autoDetection true with explicit overrides",
+			spec: platformv1alpha1.InstrumentationSpec{
+				AutoDetection: boolPtr(true),
+				FastAPI:       boolPtr(false), // Explicit override
+				LangChain:     boolPtr(false), // Explicit override
+			},
+			wantEnableInstrumentation: true,
+			wantFastAPI:               boolPtr(false), // Explicit wins
+			wantHTTPX:                 "auto",         // Auto from autoDetection
+			wantLangChain:             boolPtr(false), // Explicit wins
+			wantMCP:                   boolPtr(true),  // Not auto-capable, uses default
+		},
+		{
+			name: "autoDetection false - normal defaults apply",
+			spec: platformv1alpha1.InstrumentationSpec{
+				AutoDetection:         boolPtr(false),
+				EnableInstrumentation: boolPtr(true),
+			},
+			wantEnableInstrumentation: true,
+			wantFastAPI:               boolPtr(true), // Normal default
+			wantHTTPX:                 boolPtr(true), // Normal default
+			wantLangChain:             boolPtr(true),
+			wantMCP:                   boolPtr(true),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveInstrumentationSpec(&tt.spec)
+
+			if boolPtrValue(got.EnableInstrumentation) != tt.wantEnableInstrumentation {
+				t.Errorf("resolveInstrumentationSpec() enableInstrumentation = %v, want %v",
+					boolPtrValue(got.EnableInstrumentation), tt.wantEnableInstrumentation)
+			}
+
+			// Check FastAPI
+			if !interfaceEqual(got.FastAPI, tt.wantFastAPI) {
+				t.Errorf("resolveInstrumentationSpec() fastapi = %v, want %v",
+					got.FastAPI, tt.wantFastAPI)
+			}
+
+			// Check HTTPX
+			if !interfaceEqual(got.HTTPX, tt.wantHTTPX) {
+				t.Errorf("resolveInstrumentationSpec() httpx = %v, want %v",
+					got.HTTPX, tt.wantHTTPX)
+			}
+
+			// Check LangChain
+			if !interfaceEqual(got.LangChain, tt.wantLangChain) {
+				t.Errorf("resolveInstrumentationSpec() langchain = %v, want %v",
+					got.LangChain, tt.wantLangChain)
+			}
+
+			// Check MCP
+			if !interfaceEqual(got.MCP, tt.wantMCP) {
+				t.Errorf("resolveInstrumentationSpec() mcp = %v, want %v",
+					got.MCP, tt.wantMCP)
+			}
+		})
+	}
+}
+
+// interfaceEqual compares two interface{} values considering bool pointers and strings
+func interfaceEqual(a, b interface{}) bool {
+	// Handle string comparison
+	aStr, aIsStr := a.(string)
+	bStr, bIsStr := b.(string)
+	if aIsStr && bIsStr {
+		return aStr == bStr
+	}
+	if aIsStr != bIsStr {
+		return false
+	}
+
+	// Handle bool pointer comparison
+	aBool, aIsBoolPtr := a.(*bool)
+	bBool, bIsBoolPtr := b.(*bool)
+	if aIsBoolPtr && bIsBoolPtr {
+		if aBool == nil && bBool == nil {
+			return true
+		}
+		if aBool == nil || bBool == nil {
+			return false
+		}
+		return *aBool == *bBool
+	}
+
+	// Fallback to direct comparison
+	return a == b
+}
+
 // Helper function to check if a string contains a substring
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsSubstring(s, substr)))

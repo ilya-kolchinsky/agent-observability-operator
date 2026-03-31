@@ -579,6 +579,7 @@ func resolveInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) *pla
 	resolved := &platformv1alpha1.InstrumentationSpec{
 		CustomPythonImage:     spec.CustomPythonImage,
 		OTelCollectorEndpoint: spec.OTelCollectorEndpoint,
+		AutoDetection:         spec.AutoDetection,
 	}
 
 	// Infer enableInstrumentation if not specified
@@ -587,11 +588,26 @@ func resolveInstrumentationSpec(spec *platformv1alpha1.InstrumentationSpec) *pla
 
 	// Determine default value for library fields based on enableInstrumentation
 	defaultLibValue := enableInstrumentation
+	autoDetectionEnabled := spec.AutoDetection != nil && *spec.AutoDetection
 
 	// Apply library field values using plugins
+	// If autoDetection is enabled and plugin supports it, default to "auto"
+	// Otherwise default to enableInstrumentation value
 	for _, plugin := range plugins.InstrumentationPlugins {
 		fieldValue := getPluginFieldValue(spec, plugin.Name())
-		resolvedValue := plugin.ResolveField(fieldValue, defaultLibValue)
+
+		var resolvedValue interface{}
+		if fieldValue != nil {
+			// Explicit value provided - use it (override)
+			resolvedValue = plugin.ResolveField(fieldValue, defaultLibValue)
+		} else if autoDetectionEnabled && plugin.SupportsAutoDetection() {
+			// Auto-detection enabled and plugin supports it - use "auto"
+			resolvedValue = "auto"
+		} else {
+			// Use default based on enableInstrumentation
+			resolvedValue = plugin.ResolveField(nil, defaultLibValue)
+		}
+
 		setPluginFieldValue(resolved, plugin.Name(), resolvedValue)
 	}
 
@@ -617,7 +633,7 @@ func inferEnableInstrumentation(spec *platformv1alpha1.InstrumentationSpec) bool
 	}
 
 	// Check if any instrumentation settings are specified
-	hasSettings := spec.TracerProvider != nil
+	hasSettings := spec.TracerProvider != nil || (spec.AutoDetection != nil && *spec.AutoDetection)
 
 	// Check plugin fields
 	for _, plugin := range plugins.InstrumentationPlugins {

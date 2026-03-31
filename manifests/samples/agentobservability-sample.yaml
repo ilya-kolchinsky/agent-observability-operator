@@ -73,8 +73,8 @@ spec:
     mcp: false
     openai: false                 # App instruments OpenAI SDK in main.py
 ---
-# Sample 4: AUTO-DETECTION - Runtime ownership resolution for httpx
-# Demo: App instruments httpx, platform auto-detects and grants ownership
+# Sample 4: AUTO-DETECTION - Demonstrates autoDetection feature
+# Demo: Single setting enables auto-detection for all supported libraries
 apiVersion: platform.example.com/v1alpha1
 kind: AgentObservabilityDemo
 metadata:
@@ -89,11 +89,11 @@ spec:
   instrumentation:
     customPythonImage: agent-observability/custom-python-autoinstrumentation:latest
     otelCollectorEndpoint: http://agent-observability-collector.observability.svc.cluster.local:4318
-    enableInstrumentation: true
-    tracerProvider: app           # App owns provider (inferred from langchain: false)
-    fastapi: auto                 # AUTO-DETECTION: App uses FastAPI() → platform detects → platform owns
-    httpx: auto                   # AUTO-DETECTION: App instruments → wrapper observes → app owns
-    requests: auto                # AUTO-DETECTION: App neither instruments nor uses → UNDECIDED → not instrumented
-    langchain: false              # App instruments LangChain in main.py
-    mcp: true                     # Platform handles MCP
-    openai: auto                  # AUTO-DETECTION: App uses OpenAI() → platform detects → platform owns
+    autoDetection: true           # ENABLES AUTO-DETECTION for all supported libraries (FastAPI, HTTPX, Requests, OpenAI)
+    langchain: false              # Explicit override: App instruments LangChain in main.py
+    mcp: true                     # Explicit override: Platform handles MCP (no auto-detection support)
+    # Note: FastAPI, HTTPX, Requests, OpenAI automatically get "auto" via autoDetection
+    # - FastAPI: App uses FastAPI() → platform detects → platform owns
+    # - HTTPX: App instruments → wrapper observes → app owns
+    # - Requests: App neither instruments nor uses → UNDECIDED → not instrumented
+    # - OpenAI: App uses OpenAI() → platform detects → platform owns

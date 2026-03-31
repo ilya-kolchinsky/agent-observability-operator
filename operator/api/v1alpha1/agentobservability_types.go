@@ -37,6 +37,14 @@ type InstrumentationSpec struct {
 	// - At least one library field false → "app"
 	TracerProvider *string `json:"tracerProvider,omitempty"`
 
+	// AutoDetection enables automatic ownership detection for all supported libraries.
+	// When true, libraries that support auto-detection (FastAPI, HTTPX, Requests, OpenAI)
+	// default to "auto" instead of the enableInstrumentation value.
+	// Libraries without auto-detection support (LangChain, MCP) fall back to enableInstrumentation.
+	// Individual library fields can still override this behavior.
+	// Default: false (explicit configuration required)
+	AutoDetection *bool `json:"autoDetection,omitempty"`
+
 	// FastAPI enables fastapi instrumentation.
 	// Can be: true (platform), false (app), "auto" (runtime detection), or omitted (defaults to EnableInstrumentation)
 	// Generated field - see operator/api/v1alpha1/agentobservability_types_generated.go
