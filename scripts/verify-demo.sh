@@ -35,7 +35,7 @@ require_grep() {
 }
 
 log_step "Checking custom resources and generated Instrumentation resources"
-for demo in no-existing partial-existing full-existing auto-httpx; do
+for demo in no-existing partial-existing full-existing; do
   require_resource "AgentObservabilityDemo/${demo} exists" kubectl get agentobservabilitydemo "${demo}" -n "${DEMO_NAMESPACE}"
   require_resource "Instrumentation/${demo}-instrumentation exists" kubectl get instrumentation "${demo}-instrumentation" -n "${DEMO_NAMESPACE}"
 done

@@ -32,7 +32,7 @@ step '7b. Wait for operator to reconcile and pods to be instrumented'
 printf 'Waiting for Instrumentation resources and instrumented pods...\n'
 
 # First, wait for Instrumentation resources to be created
-for demo in no-existing partial-existing full-existing auto-httpx; do
+for demo in no-existing partial-existing full-existing; do
   timeout=30
   while ! kubectl get instrumentation "${demo}-instrumentation" -n demo-apps >/dev/null 2>&1; do
     if [ $timeout -le 0 ]; then
